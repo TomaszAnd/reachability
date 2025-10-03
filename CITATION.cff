@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "reach: Time-Free Quantum Reachability Analysis"
+version: 0.1.0
+date-released: 2025-01-03
+url: "https://github.com/TomaszAnd/reach"
+repository-code: "https://github.com/TomaszAnd/reach"
+type: software
+license: MIT
+authors:
+  - family-names: "<Author Last Name>"
+    given-names: "<Author First Name>"
+    email: "TomaszAnd@users.noreply.github.com"
+keywords:
+  - quantum computing
+  - reachability analysis
+  - random matrix theory
+  - spectral overlap
+  - time-free dynamics
+abstract: >
+  reach is a Python package for analyzing quantum state reachability
+  using time-free spectral overlap criteria. Instead of asking whether
+  one can reach a target state at a specific time, the analysis determines
+  whether a target state lies within the reachable subspace spanned by a
+  parameterized Hamiltonian family. The package provides Monte Carlo
+  analysis over random matrix ensembles (GOE/GUE) with full reproducibility
+  and publication-quality visualization tools.
