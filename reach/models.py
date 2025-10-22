@@ -191,7 +191,7 @@ class GeometricTwoLocal:
                     else:
                         op = spkron(op, pauli if s == site else identity, format='csr')
 
-                basis.append(qutip.Qobj(op, dims=[[2]*self.n_sites, [2]*self.n_sites]))
+                basis.append(qutip.Qobj(op, dims=[[self.dim], [self.dim]]))
 
         # 2-local terms: Pauli_i ⊗ Pauli_j for each edge
         edges = self._build_lattice_edges()
@@ -216,7 +216,7 @@ class GeometricTwoLocal:
                             else:
                                 op = spkron(op, identity, format='csr')
 
-                    basis.append(qutip.Qobj(op, dims=[[2]*self.n_sites, [2]*self.n_sites]))
+                    basis.append(qutip.Qobj(op, dims=[[self.dim], [self.dim]]))
 
         return basis
 
@@ -234,6 +234,8 @@ class GeometricTwoLocal:
                 ops = [identity] * self.n_sites
                 ops[site] = pauli
                 term = qutip.tensor(ops)
+                # Flatten dims to match pipeline expectations
+                term.dims = [[self.dim], [self.dim]]
                 basis.append(term)
 
         # 2-local terms
@@ -245,6 +247,8 @@ class GeometricTwoLocal:
                     ops[site_i] = pauli_i
                     ops[site_j] = pauli_j
                     term = qutip.tensor(ops)
+                    # Flatten dims to match pipeline expectations
+                    term.dims = [[self.dim], [self.dim]]
                     basis.append(term)
 
         return basis
