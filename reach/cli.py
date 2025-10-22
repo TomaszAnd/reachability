@@ -120,6 +120,16 @@ Examples:
     cmd_landscape.add_argument(
         "--plot-3d", action="store_true", help="Generate additional 3D surface plot"
     )
+    cmd_landscape.add_argument(
+        "--no-smooth",
+        action="store_true",
+        help="Skip Gaussian smoothing and interpolation (raw grid)",
+    )
+    cmd_landscape.add_argument(
+        "--oversample-axes",
+        action="store_true",
+        help="Compute values exactly along λ₁=0 and λ₂=0 (not yet implemented)",
+    )
 
     # tau-hist subcommand
     cmd_tau = subparsers.add_parser("tau-hist", help="Generate τ threshold histograms")
@@ -193,21 +203,39 @@ Examples:
         help=f"Unreachability threshold (default: {settings.DEFAULT_TAU})",
     )
 
-    # compare-rank subcommand
+    # compare-rank subcommand (rescaled, no inset)
     cmd_rank = subparsers.add_parser(
-        "compare-rank", help="Generate old vs new criterion comparison"
+        "compare-rank", help="Generate old vs new criterion comparison (rescaled, no inset)"
     )
     cmd_rank.add_argument(
-        "--dims", type=str, default="3,4,5,6,7,8,10,12,15", help="Comma-separated dimensions"
+        "--dims", type=str, default="6,8,10,12,14,16,18,20,24,30", help="Comma-separated dimensions (default: 6,8,10,12,14,16,18,20,24,30)"
     )
     cmd_rank.add_argument(
-        "--kmax", type=int, default=7, help="Maximum number of Hamiltonians (default: 7)"
+        "--kmax", type=int, default=14, help="Maximum number of Hamiltonians (default: 14)"
     )
     cmd_rank.add_argument(
-        "--tau",
+        "--taus",
+        type=str,
+        required=True,
+        help="Comma-separated tau values (e.g., '0.99,0.999')",
+    )
+    cmd_rank.add_argument(
+        "--eps-floor",
         type=float,
-        default=settings.DEFAULT_TAU,
-        help=f"Unreachability threshold (default: {settings.DEFAULT_TAU})",
+        default=1e-9,
+        help="Epsilon floor for log10 display (default: 1e-9)",
+    )
+    cmd_rank.add_argument(
+        "--legend-loc",
+        type=str,
+        default="lower left",
+        help="Legend location (default: 'lower left')",
+    )
+    cmd_rank.add_argument(
+        "--hide-floored",
+        action="store_true",
+        default=True,
+        help="Hide points with p <= eps_floor to avoid cliff artifacts (default: True)",
     )
 
     # audit-old-criterion subcommand
@@ -222,6 +250,273 @@ Examples:
         type=str,
         default="2,3,4,5",
         help="Comma-separated k values (default: 2,3,4,5)",
+    )
+
+    # single-d-vs-k subcommand
+    cmd_single_d = subparsers.add_parser(
+        "single-d-vs-k", help="Plot P(unreachability) vs K for a single fixed dimension"
+    )
+    cmd_single_d.add_argument(
+        "--d", type=int, required=True, help="Hilbert space dimension (fixed)"
+    )
+    cmd_single_d.add_argument(
+        "--k-max", type=int, required=True, help="Maximum K value (sweep from 1 to k-max)"
+    )
+    cmd_single_d.add_argument(
+        "--tau",
+        type=float,
+        default=settings.DEFAULT_TAU,
+        help=f"Unreachability threshold (default: {settings.DEFAULT_TAU})",
+    )
+
+    # rank-compare-zoom subcommand
+    cmd_rank_zoom = subparsers.add_parser(
+        "rank-compare-zoom", help="Generate old vs new criterion comparison with zoomed inset"
+    )
+    cmd_rank_zoom.add_argument(
+        "--dims", type=str, default="6,8,10,12", help="Comma-separated dimensions (default: 6,8,10,12)"
+    )
+    cmd_rank_zoom.add_argument(
+        "--kmax", type=int, default=7, help="Maximum number of Hamiltonians (default: 7)"
+    )
+    cmd_rank_zoom.add_argument(
+        "--taus",
+        type=str,
+        required=True,
+        help="Comma-separated tau values (e.g., '0.99,0.999')",
+    )
+    cmd_rank_zoom.add_argument(
+        "--yfloor",
+        type=float,
+        default=1e-8,
+        help="Display floor for log scale (default: 1e-8)",
+    )
+
+    # three-criteria-vs-m subcommand
+    cmd_3crit_m = subparsers.add_parser(
+        "three-criteria-vs-m",
+        help="Compare 3 criteria (spectral, old, Krylov) vs Krylov rank m",
+    )
+    cmd_3crit_m.add_argument(
+        "--ensemble", choices=["GOE", "GUE"], required=True, help="Random matrix ensemble"
+    )
+    cmd_3crit_m.add_argument("-d", "--dim", type=int, required=True, help="Hilbert space dimension")
+    cmd_3crit_m.add_argument(
+        "-K", "--k", type=int, required=True, help="Number of Hamiltonians (fixed)"
+    )
+    cmd_3crit_m.add_argument(
+        "--m-values",
+        type=str,
+        required=True,
+        help="Comma-separated Krylov ranks (e.g., '1,2,3,4,5')",
+    )
+    cmd_3crit_m.add_argument(
+        "--tau",
+        type=float,
+        default=settings.DEFAULT_TAU,
+        help=f"Threshold for spectral (default: {settings.DEFAULT_TAU})",
+    )
+    cmd_3crit_m.add_argument(
+        "--trials", type=int, default=150, help="Number of total trials (nks * nst, default: 150)"
+    )
+    cmd_3crit_m.add_argument(
+        "--criteria",
+        type=str,
+        default="krylov,spectral,old",
+        help="Comma-separated criteria (default: krylov,spectral,old)",
+    )
+    cmd_3crit_m.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        help="Optional CSV file path to log results (one row per m per criterion)",
+    )
+
+    # three-criteria-vs-K subcommand
+    cmd_3crit_K = subparsers.add_parser(
+        "three-criteria-vs-K", help="Compare 3 criteria vs K (number of Hamiltonians)"
+    )
+    cmd_3crit_K.add_argument(
+        "--ensemble", choices=["GOE", "GUE"], required=True, help="Random matrix ensemble"
+    )
+    cmd_3crit_K.add_argument(
+        "-d", "--dim", type=int, required=True, help="Hilbert space dimension (fixed)"
+    )
+    cmd_3crit_K.add_argument(
+        "--k-values", type=str, required=True, help="Comma-separated K values (e.g., '1,2,3,4,5')"
+    )
+    cmd_3crit_K.add_argument(
+        "--tau",
+        type=float,
+        default=settings.DEFAULT_TAU,
+        help=f"Threshold for spectral (default: {settings.DEFAULT_TAU})",
+    )
+    cmd_3crit_K.add_argument(
+        "--krylov-m",
+        type=str,
+        default="K",
+        help="Krylov m strategy: 'K' (dynamic) or fixed int (default: 'K')",
+    )
+    cmd_3crit_K.add_argument(
+        "--trials", type=int, default=150, help="Number of total trials (default: 150)"
+    )
+    cmd_3crit_K.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        help="Optional CSV file path to log results (one row per K per criterion)",
+    )
+
+    # three-criteria-vs-density subcommand
+    cmd_3crit_dens = subparsers.add_parser(
+        "three-criteria-vs-density",
+        help="Compare 3 criteria vs density (K/d²) for multiple dimensions",
+    )
+    cmd_3crit_dens.add_argument(
+        "--ensemble", choices=["GOE", "GUE"], required=True, help="Random matrix ensemble"
+    )
+    cmd_3crit_dens.add_argument(
+        "--dims",
+        type=str,
+        required=True,
+        help="Comma-separated dimensions (e.g., '20,30,40,50')",
+    )
+    cmd_3crit_dens.add_argument(
+        "--rho-max",
+        type=float,
+        required=True,
+        help="Maximum density value K/d² (e.g., 0.15)",
+    )
+    cmd_3crit_dens.add_argument(
+        "--rho-step",
+        type=float,
+        required=True,
+        help="Density step size (e.g., 0.01)",
+    )
+    cmd_3crit_dens.add_argument(
+        "--taus",
+        type=str,
+        required=True,
+        help="Comma-separated tau values for spectral (e.g., '0.90,0.95,0.99')",
+    )
+    cmd_3crit_dens.add_argument(
+        "--trials", type=int, default=150, help="Number of total trials (default: 150)"
+    )
+    cmd_3crit_dens.add_argument(
+        "--k-cap",
+        type=int,
+        default=200,
+        help="Maximum K value cap (default: 200)",
+    )
+    cmd_3crit_dens.add_argument(
+        "--y",
+        type=str,
+        choices=["reachable", "unreachable"],
+        default="unreachable",
+        help="Y-axis quantity: 'unreachable' (default) or 'reachable'",
+    )
+    cmd_3crit_dens.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        help="Optional CSV file path to log results",
+    )
+    cmd_3crit_dens.add_argument(
+        "--flush-every",
+        type=int,
+        default=10,
+        help="Flush CSV to disk every N data points (default: 10, enables streaming/resumable runs)",
+    )
+
+    # three-criteria-vs-K-multi-tau subcommand
+    cmd_3crit_K_multitau = subparsers.add_parser(
+        "three-criteria-vs-K-multi-tau",
+        help="K-sweep with multiple τ for spectral (shows gradient)",
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "--ensemble", choices=["GOE", "GUE"], required=True, help="Random matrix ensemble"
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "-d", "--dim", type=int, required=True, help="Hilbert space dimension (fixed)"
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "--k-max",
+        type=int,
+        required=True,
+        help="Maximum K value (sweep from 2 to k-max)",
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "--taus",
+        type=str,
+        required=True,
+        help="Comma-separated tau values for spectral (e.g., '0.90,0.95,0.99')",
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "--trials", type=int, default=300, help="Number of total trials (default: 300)"
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        help="Optional CSV file path to log results",
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "--y",
+        type=str,
+        choices=["reachable", "unreachable"],
+        default="unreachable",
+        help="Plot P(reachable) or P(unreachable) (default: unreachable)",
+    )
+    cmd_3crit_K_multitau.add_argument(
+        "--flush-every",
+        type=int,
+        default=10,
+        help="Flush CSV to disk every N data points (default: 10, enables streaming/resumable runs)",
+    )
+
+    # plot-from-csv subcommand
+    cmd_plot_csv = subparsers.add_parser(
+        "plot-from-csv",
+        help="Generate plots from existing CSV files (useful for partial/incremental results)",
+    )
+    cmd_plot_csv.add_argument(
+        "--csv",
+        type=str,
+        required=True,
+        help="Path to CSV file (e.g., fig_summary/density_gue.csv)",
+    )
+    cmd_plot_csv.add_argument(
+        "--type",
+        type=str,
+        required=True,
+        choices=["density", "k-multi-tau"],
+        help="Plot type: 'density' or 'k-multi-tau'",
+    )
+    cmd_plot_csv.add_argument(
+        "--ensemble",
+        type=str,
+        choices=["GOE", "GUE"],
+        default="GUE",
+        help="Random matrix ensemble (default: GUE)",
+    )
+    cmd_plot_csv.add_argument(
+        "--y",
+        type=str,
+        choices=["unreachable", "reachable"],
+        default="unreachable",
+        help="Y-axis quantity (default: unreachable)",
+    )
+    cmd_plot_csv.add_argument(
+        "--outdir",
+        type=str,
+        default="fig_summary/",
+        help="Output directory for plots (default: fig_summary/)",
+    )
+    cmd_plot_csv.add_argument(
+        "--taus",
+        type=str,
+        default=None,
+        help="Optional: filter to specific tau values (comma-separated, e.g., '0.90,0.95,0.99')",
     )
 
     return parser
@@ -253,6 +548,7 @@ def cmd_landscape_S(args) -> None:
         n_targets=args.targets,
         lambda_range=tuple(args.lambda_range),
         seed=args.seed,
+        no_smooth=args.no_smooth,
     )
 
     # Generate 2D plot (required)
@@ -379,45 +675,63 @@ def cmd_iter_sweep(args) -> None:
 
 
 def cmd_compare_rank(args) -> None:
-    """Execute compare-rank subcommand."""
+    """Execute compare-rank subcommand (rescaled, no inset)."""
     dims = parse_comma_separated(args.dims, int)
+    taus = parse_comma_separated(args.taus, float)
     nks, nst = get_sampling_params(args.fast)
 
-    logger.info(f"Generating rank comparison: dims={dims}, {args.ensemble}")
+    logger.info(f"Rank comparison (rescaled): dims={dims}, taus={taus}, {args.ensemble}")
 
-    # Compute old vs new comparison (simplified for CLI)
-    new_results = analysis.monte_carlo_unreachability(
+    # Compute old criterion probabilities (τ-free, so compute once)
+    logger.info("Computing old criterion probabilities (τ-free)...")
+    k_values = list(range(2, args.kmax + 1))
+    old_results = analysis.old_criterion_probabilities(
         dims=dims,
-        ks=list(range(2, args.kmax + 1)),
+        k_values=k_values,
         ensemble=args.ensemble,
-        tau=args.tau,
-        nks=nks,
-        nst=nst,
+        nks=nks // 4,
+        nst=nst // 4,
         seed=args.seed,
     )
 
-    # For old results, use mock data (would need legacy implementation)
-    old_results = {}
-    for (d, k), prob in new_results.items():
-        # Mock old criterion results (placeholder)
-        if k == 2:
-            old_results[(d, k)] = 1.0  # Always unreachable for k=2 in old criterion
-        elif prob > 0.1:
-            old_results[(d, k)] = prob * 0.3  # Scale down for demonstration
-        else:
-            old_results[(d, k)] = settings.DISPLAY_FLOOR
+    # For each tau, compute new criterion and generate rescaled plot
+    for tau in taus:
+        logger.info(f"Processing tau={tau}...")
 
-    # Generate plots
-    saved_paths = viz.plot_rank_comparison(
-        old_results=old_results,
-        new_results=new_results,
-        dims=dims,
-        ensemble=args.ensemble,
-        output_dir=args.outdir,
-    )
+        # Compute new criterion probabilities for this tau
+        logger.info(f"  Computing new criterion probabilities for τ={tau}...")
+        new_results = {}
+        for k in k_values:
+            logger.info(f"    Processing k={k}")
+            prob_data = analysis.probability_vs_tau(
+                dims=dims,
+                k=k,
+                ensemble=args.ensemble,
+                taus=np.array([tau]),
+                nks_tau=nks // 4,
+                nst_tau=nst // 4,
+                method=settings.DEFAULT_METHOD,
+                maxiter=settings.DEFAULT_MAXITER,
+                seed=args.seed,
+            )
+            for d in dims:
+                if k < d and d in prob_data:
+                    new_results[(d, k)] = prob_data[d]["p"][0]
 
-    for path in saved_paths:
-        print(f"Saved: {path}")
+        # Generate rescaled plot (no inset)
+        saved_path = viz.plot_rank_comparison_rescaled(
+            old_results=old_results,
+            new_results=new_results,
+            dims=dims,
+            ensemble=args.ensemble,
+            tau=tau,
+            output_dir=args.outdir,
+            eps_floor=args.eps_floor,
+            legend_loc=args.legend_loc,
+            hide_floored=args.hide_floored,
+        )
+
+        print(f"Saved: {saved_path}")
 
 
 def cmd_audit_old_criterion(args) -> None:
@@ -485,6 +799,568 @@ def cmd_audit_old_criterion(args) -> None:
             print(f"  k={k}: old={old_p:.4f}, new={new_p:.4f}, ratio={ratio:.2f}")
 
 
+def cmd_single_d_vs_k(args) -> None:
+    """Execute single-d-vs-k subcommand."""
+    nks, nst = get_sampling_params(args.fast)
+    ks = list(range(1, args.k_max + 1))
+
+    logger.info(f"Single-d K sweep: d={args.d}, K=1..{args.k_max}, tau={args.tau}")
+
+    # Compute probabilities vs K for fixed d
+    data = analysis.probability_vs_k_single_d(
+        d=args.d,
+        ks=ks,
+        ensemble=args.ensemble,
+        tau=args.tau,
+        nks=nks,
+        nst=nst,
+        method=settings.DEFAULT_METHOD,
+        maxiter=settings.DEFAULT_MAXITER,
+        seed=args.seed,
+    )
+
+    # Generate plot
+    saved_path = viz.plot_unreach_vs_k_single_d(
+        data=data,
+        d=args.d,
+        ensemble=args.ensemble,
+        tau=args.tau,
+        output_dir=args.outdir,
+    )
+
+    print(f"Saved: {saved_path}")
+
+
+def cmd_rank_compare_zoom(args) -> None:
+    """Execute rank-compare-zoom subcommand."""
+    dims = parse_comma_separated(args.dims, int)
+    taus = parse_comma_separated(args.taus, float)
+    nks, nst = get_sampling_params(args.fast)
+
+    logger.info(f"Rank comparison with zoom: dims={dims}, taus={taus}, {args.ensemble}")
+
+    # Compute old criterion probabilities (τ-free, so compute once)
+    logger.info("Computing old criterion probabilities (τ-free)...")
+    k_values = list(range(2, args.kmax + 1))
+    old_results = analysis.old_criterion_probabilities(
+        dims=dims,
+        k_values=k_values,
+        ensemble=args.ensemble,
+        nks=nks // 4,
+        nst=nst // 4,
+        seed=args.seed,
+    )
+
+    # For each tau, compute new criterion and generate plot with inset
+    for tau in taus:
+        logger.info(f"Processing tau={tau}...")
+
+        # Compute new criterion probabilities for this tau
+        logger.info(f"  Computing new criterion probabilities for τ={tau}...")
+        new_results = {}
+        for k in k_values:
+            logger.info(f"    Processing k={k}")
+            prob_data = analysis.probability_vs_tau(
+                dims=dims,
+                k=k,
+                ensemble=args.ensemble,
+                taus=np.array([tau]),
+                nks_tau=nks // 4,
+                nst_tau=nst // 4,
+                method=settings.DEFAULT_METHOD,
+                maxiter=settings.DEFAULT_MAXITER,
+                seed=args.seed,
+            )
+            for d in dims:
+                if k < d and d in prob_data:
+                    new_results[(d, k)] = prob_data[d]["p"][0]
+
+        # Generate plot with inset
+        saved_path = viz.plot_rank_comparison_with_inset(
+            old_results=old_results,
+            new_results=new_results,
+            dims=dims,
+            ensemble=args.ensemble,
+            tau=tau,
+            output_dir=args.outdir,
+            y_floor=args.yfloor,
+        )
+
+        print(f"Saved: {saved_path}")
+
+
+def cmd_three_criteria_vs_m(args) -> None:
+    """Execute three-criteria-vs-m subcommand."""
+    from datetime import datetime
+    from . import logging_utils
+
+    m_vals = parse_comma_separated(args.m_values, int)
+    crit_list = tuple(args.criteria.split(","))
+
+    # Compute sampling from trials (split between nks and nst)
+    # Use approximate sqrt split: nks * nst ≈ trials
+    nks = int(np.sqrt(args.trials))
+    nst = args.trials // nks
+
+    logger.info(
+        f"Three-criteria m-sweep: d={args.dim}, K={args.k}, {args.ensemble}, "
+        f"m_values={m_vals}, tau={args.tau}, trials={args.trials} (nks={nks}, nst={nst})"
+    )
+
+    # Compute
+    data = analysis.monte_carlo_unreachability_vs_m(
+        d=args.dim,
+        m_values=m_vals,
+        K=args.k,
+        ensemble=args.ensemble,
+        criteria=crit_list,
+        tau=args.tau,
+        nks=nks,
+        nst=nst,
+        seed=args.seed,
+    )
+
+    # CSV logging (if requested)
+    if args.csv:
+        import uuid
+
+        run_id = f"m_sweep_{uuid.uuid4().hex[:8]}"
+        timestamp = datetime.now().isoformat()
+        rows = []
+
+        for criterion in crit_list:
+            p_key = f"p_{criterion}"
+            err_key = f"err_{criterion}"
+
+            if p_key not in data:
+                continue
+
+            for i, m in enumerate(m_vals):
+                p_unreach = float(data[p_key][i])
+                log10_p = float(np.log10(max(p_unreach, settings.DISPLAY_FLOOR)))
+                successes = int(p_unreach * args.trials)
+
+                # For spectral: include overlap statistics
+                if criterion == "spectral" and "mean_best_overlap_spectral" in data:
+                    mean_overlap = float(data["mean_best_overlap_spectral"][i])
+                    sem_overlap = float(data["sem_best_overlap_spectral"][i])
+                else:
+                    mean_overlap = ""
+                    sem_overlap = ""
+
+                row = {
+                    "run_id": run_id,
+                    "timestamp": timestamp,
+                    "ensemble": args.ensemble,
+                    "criterion": criterion,
+                    "tau": args.tau if criterion == "spectral" else "",
+                    "d": args.dim,
+                    "K": args.k,
+                    "m": m,
+                    "rho_K_over_d2": args.k / (args.dim**2),
+                    "trials": args.trials,
+                    "successes_unreach": successes,
+                    "p_unreach": p_unreach,
+                    "log10_p_unreach": log10_p,
+                    "mean_best_overlap": mean_overlap,
+                    "sem_best_overlap": sem_overlap,
+                }
+                rows.append(row)
+
+        logging_utils.append_rows_csv(args.csv, rows, logging_utils.REACHABILITY_CSV_FIELDS)
+        logger.info(f"Logged {len(rows)} rows to CSV: {args.csv}")
+
+    # Plot
+    outdir = args.summary_dir if args.summary else args.outdir
+    filepath = viz.plot_unreachability_three_criteria_vs_m(
+        data=data,
+        ensemble=args.ensemble,
+        d=args.dim,
+        K=args.k,
+        tau=args.tau,
+        outdir=outdir,
+        trials=args.trials,
+    )
+
+    print(f"Saved: {filepath}")
+
+
+def cmd_three_criteria_vs_K(args) -> None:
+    """Execute three-criteria-vs-K subcommand."""
+    from datetime import datetime
+    from . import logging_utils
+
+    k_vals = parse_comma_separated(args.k_values, int)
+
+    # Parse Krylov m strategy
+    if args.krylov_m == "K":
+        strategy = "K"
+        fixed = None
+    else:
+        strategy = "fixed"
+        fixed = int(args.krylov_m)
+
+    # Compute sampling
+    nks = int(np.sqrt(args.trials))
+    nst = args.trials // nks
+
+    logger.info(
+        f"Three-criteria K-sweep: d={args.dim}, {args.ensemble}, k_values={k_vals}, "
+        f"tau={args.tau}, Krylov m={args.krylov_m}, trials={args.trials} (nks={nks}, nst={nst})"
+    )
+
+    # Compute
+    data = analysis.monte_carlo_unreachability_vs_K_three(
+        d=args.dim,
+        k_values=k_vals,
+        ensemble=args.ensemble,
+        tau=args.tau,
+        krylov_m_strategy=strategy,
+        krylov_m_fixed=fixed,
+        nks=nks,
+        nst=nst,
+        seed=args.seed,
+    )
+
+    # CSV logging (if requested)
+    if args.csv:
+        import uuid
+
+        run_id = f"K_sweep_{uuid.uuid4().hex[:8]}"
+        timestamp = datetime.now().isoformat()
+        rows = []
+
+        criteria = ["krylov", "spectral", "old"]
+        for criterion in criteria:
+            p_key = f"p_{criterion}"
+            if p_key not in data:
+                continue
+
+            for i, K in enumerate(k_vals):
+                p_unreach = float(data[p_key][i])
+                log10_p = float(np.log10(max(p_unreach, settings.DISPLAY_FLOOR)))
+                successes = int(p_unreach * args.trials)
+
+                # Determine m for Krylov (for CSV logging consistency)
+                if strategy == "K":
+                    m_value = K
+                else:
+                    m_value = fixed if fixed is not None else K
+                m_value = max(1, min(m_value, args.dim))
+
+                # For spectral: include overlap statistics
+                if criterion == "spectral" and "mean_best_overlap_spectral" in data:
+                    mean_overlap = float(data["mean_best_overlap_spectral"][i])
+                    sem_overlap = float(data["sem_best_overlap_spectral"][i])
+                else:
+                    mean_overlap = ""
+                    sem_overlap = ""
+
+                row = {
+                    "run_id": run_id,
+                    "timestamp": timestamp,
+                    "ensemble": args.ensemble,
+                    "criterion": criterion,
+                    "tau": args.tau if criterion == "spectral" else "",
+                    "d": args.dim,
+                    "K": K,
+                    "m": m_value if criterion == "krylov" else "",
+                    "rho_K_over_d2": K / (args.dim**2),
+                    "trials": args.trials,
+                    "successes_unreach": successes,
+                    "p_unreach": p_unreach,
+                    "log10_p_unreach": log10_p,
+                    "mean_best_overlap": mean_overlap,
+                    "sem_best_overlap": sem_overlap,
+                }
+                rows.append(row)
+
+        logging_utils.append_rows_csv(args.csv, rows, logging_utils.REACHABILITY_CSV_FIELDS)
+        logger.info(f"Logged {len(rows)} rows to CSV: {args.csv}")
+
+    # Plot
+    outdir = args.summary_dir if args.summary else args.outdir
+    filepath = viz.plot_unreachability_three_criteria_vs_K(
+        data=data,
+        ensemble=args.ensemble,
+        d=args.dim,
+        tau=args.tau,
+        outdir=outdir,
+        trials=args.trials,
+    )
+
+    print(f"Saved: {filepath}")
+
+
+def cmd_three_criteria_vs_density(args) -> None:
+    """Execute three-criteria-vs-density subcommand."""
+    from datetime import datetime
+    from . import logging_utils
+
+    dims = parse_comma_separated(args.dims, int)
+    taus = parse_comma_separated(args.taus, float)
+
+    # HARD ASSERTION: Density sweeps must use exactly {20, 30, 40, 50}
+    REQUIRED_DIMS = {20, 30, 40, 50}
+    if set(dims) != REQUIRED_DIMS:
+        raise ValueError(
+            f"Density sweep requires EXACTLY dims={sorted(REQUIRED_DIMS)}, "
+            f"got dims={sorted(set(dims))}. This ensures publication-ready comparisons."
+        )
+
+    # Compute sampling
+    nks = int(np.sqrt(args.trials))
+    nst = args.trials // nks
+
+    logger.info(
+        f"Three-criteria density sweep: ensemble={args.ensemble}, dims={dims}, "
+        f"rho_max={args.rho_max}, rho_step={args.rho_step}, k_cap={args.k_cap}, "
+        f"taus={taus}, trials={args.trials} (nks={nks}, nst={nst}), y={args.y}"
+    )
+
+    # Compute
+    data = analysis.monte_carlo_unreachability_vs_density(
+        dims=dims,
+        rho_max=args.rho_max,
+        rho_step=args.rho_step,
+        taus=taus,
+        ensemble=args.ensemble,
+        k_cap=args.k_cap,
+        nks=nks,
+        nst=nst,
+        seed=args.seed,
+    )
+
+    # CSV logging (if requested) - using streaming writer
+    if args.csv:
+        import uuid
+
+        run_id = f"density_{uuid.uuid4().hex[:8]}"
+        timestamp = datetime.now().isoformat()
+
+        with logging_utils.StreamingCSVWriter(
+            args.csv, flush_every=args.flush_every
+        ) as csv_writer:
+            row_count = 0
+            for tau in taus:
+                for criterion in ["spectral", "old", "krylov"]:
+                    for d in dims:
+                        key = (d, tau, criterion)
+                        if key not in data:
+                            continue
+
+                        result = data[key]
+                        K_vals = result["K"]
+                        rho_vals = result["rho"]
+                        p_vals = result["p"]
+
+                        for i, K in enumerate(K_vals):
+                            p_unreach = float(p_vals[i])
+                            log10_p = float(np.log10(max(p_unreach, settings.DISPLAY_FLOOR)))
+                            successes = int(p_unreach * args.trials)
+
+                            # For spectral: include overlap statistics
+                            if criterion == "spectral" and "mean_overlap" in result:
+                                mean_overlap = float(result["mean_overlap"][i])
+                                sem_overlap = float(result["sem_overlap"][i])
+                            else:
+                                mean_overlap = ""
+                                sem_overlap = ""
+
+                            row = {
+                                "run_id": run_id,
+                                "timestamp": timestamp,
+                                "ensemble": args.ensemble,
+                                "criterion": criterion,
+                                "tau": tau if criterion == "spectral" else "",
+                                "d": d,
+                                "K": int(K),
+                                "m": "",  # Not applicable for density plots
+                                "rho_K_over_d2": float(rho_vals[i]),
+                                "trials": args.trials,
+                                "successes_unreach": successes,
+                                "p_unreach": p_unreach,
+                                "log10_p_unreach": log10_p,
+                                "mean_best_overlap": mean_overlap,
+                                "sem_best_overlap": sem_overlap,
+                            }
+                            csv_writer.write_row(row)
+                            row_count += 1
+
+        logger.info(f"Logged {row_count} rows to CSV: {args.csv}")
+
+    # Plot
+    outdir = args.summary_dir if args.summary else args.outdir
+    filepaths = viz.plot_unreachability_three_criteria_vs_density(
+        data=data,
+        ensemble=args.ensemble,
+        outdir=outdir,
+        trials=args.trials,
+        y_axis=args.y,
+    )
+
+    for filepath in filepaths:
+        print(f"Saved: {filepath}")
+
+
+def cmd_three_criteria_vs_K_multi_tau(args) -> None:
+    """Execute three-criteria-vs-K-multi-tau subcommand."""
+    from datetime import datetime
+    from . import logging_utils
+
+    taus = parse_comma_separated(args.taus, float)
+
+    # Compute sampling
+    nks = int(np.sqrt(args.trials))
+    nst = args.trials // nks
+
+    logger.info(
+        f"K-sweep multi-tau: d={args.dim}, k_max={args.k_max}, {args.ensemble}, "
+        f"taus={taus}, trials={args.trials} (nks={nks}, nst={nst}), y={args.y}"
+    )
+
+    # Compute
+    data = analysis.monte_carlo_unreachability_vs_K_multi_tau(
+        d=args.dim,
+        k_max=args.k_max,
+        taus=taus,
+        ensemble=args.ensemble,
+        nks=nks,
+        nst=nst,
+        seed=args.seed,
+    )
+
+    # CSV logging (if requested) - using streaming writer
+    if args.csv:
+        import uuid
+
+        run_id = f"Kmulti_{uuid.uuid4().hex[:8]}"
+        timestamp = datetime.now().isoformat()
+
+        with logging_utils.StreamingCSVWriter(
+            args.csv, flush_every=args.flush_every
+        ) as csv_writer:
+            row_count = 0
+            k_values = data["k"]
+
+            # Log spectral for each tau
+            for tau in taus:
+                result = data[(tau, "spectral")]
+                p_vals = result["p"]
+                mean_overlaps = result["mean_overlap"]
+                sem_overlaps = result["sem_overlap"]
+
+                for i, K in enumerate(k_values):
+                    p_unreach = float(p_vals[i])
+                    log10_p = float(np.log10(max(p_unreach, settings.DISPLAY_FLOOR)))
+                    successes = int(p_unreach * args.trials)
+
+                    row = {
+                        "run_id": run_id,
+                        "timestamp": timestamp,
+                        "ensemble": args.ensemble,
+                        "criterion": "spectral",
+                        "tau": tau,
+                        "d": args.dim,
+                        "K": int(K),
+                        "m": "",
+                        "rho_K_over_d2": K / (args.dim**2),
+                        "trials": args.trials,
+                        "successes_unreach": successes,
+                        "p_unreach": p_unreach,
+                        "log10_p_unreach": log10_p,
+                        "mean_best_overlap": float(mean_overlaps[i]),
+                        "sem_best_overlap": float(sem_overlaps[i]),
+                    }
+                    csv_writer.write_row(row)
+                    row_count += 1
+
+            # Log old and krylov (tau-independent)
+            for criterion in ["old", "krylov"]:
+                result = data[criterion]
+                p_vals = result["p"]
+
+                for i, K in enumerate(k_values):
+                    p_unreach = float(p_vals[i])
+                    log10_p = float(np.log10(max(p_unreach, settings.DISPLAY_FLOOR)))
+                    successes = int(p_unreach * args.trials)
+
+                    # Determine m for Krylov
+                    m_value = min(int(K), args.dim) if criterion == "krylov" else ""
+
+                    row = {
+                        "run_id": run_id,
+                        "timestamp": timestamp,
+                        "ensemble": args.ensemble,
+                        "criterion": criterion,
+                        "tau": "",
+                        "d": args.dim,
+                        "K": int(K),
+                        "m": m_value,
+                        "rho_K_over_d2": K / (args.dim**2),
+                        "trials": args.trials,
+                        "successes_unreach": successes,
+                        "p_unreach": p_unreach,
+                        "log10_p_unreach": log10_p,
+                        "mean_best_overlap": "",
+                        "sem_best_overlap": "",
+                    }
+                    csv_writer.write_row(row)
+                    row_count += 1
+
+        logger.info(f"Logged {row_count} rows to CSV: {args.csv}")
+
+    # Plot
+    outdir = args.summary_dir if args.summary else args.outdir
+    filepath = viz.plot_unreachability_K_multi_tau(
+        data=data,
+        ensemble=args.ensemble,
+        outdir=outdir,
+        trials=args.trials,
+        y_type=args.y,
+    )
+
+    print(f"Saved: {filepath}")
+
+
+def cmd_plot_from_csv(args) -> None:
+    """Execute plot-from-csv subcommand."""
+    from . import viz_csv
+
+    logger.info(
+        f"Plotting from CSV: {args.csv}, type={args.type}, "
+        f"ensemble={args.ensemble}, y={args.y}"
+    )
+
+    # Parse optional tau filter
+    taus = None
+    if args.taus:
+        taus = parse_comma_separated(args.taus, float)
+
+    # Route to appropriate plotting function
+    if args.type == "density":
+        filepaths = viz_csv.plot_density_from_csv(
+            csv_path=args.csv,
+            ensemble=args.ensemble,
+            y_axis=args.y,
+            outdir=args.outdir,
+            taus=taus,
+        )
+    elif args.type == "k-multi-tau":
+        filepaths = viz_csv.plot_k_multi_tau_from_csv(
+            csv_path=args.csv,
+            ensemble=args.ensemble,
+            y_type=args.y,
+            outdir=args.outdir,
+            taus=taus,
+        )
+    else:
+        raise ValueError(f"Unknown plot type: {args.type}")
+
+    for filepath in filepaths:
+        print(f"Saved: {filepath}")
+
+
 def main() -> None:
     """Main CLI entry point."""
     parser = create_parser()
@@ -518,6 +1394,13 @@ def main() -> None:
         "iter-sweep": cmd_iter_sweep,
         "compare-rank": cmd_compare_rank,
         "audit-old-criterion": cmd_audit_old_criterion,
+        "single-d-vs-k": cmd_single_d_vs_k,
+        "rank-compare-zoom": cmd_rank_compare_zoom,
+        "three-criteria-vs-m": cmd_three_criteria_vs_m,
+        "three-criteria-vs-K": cmd_three_criteria_vs_K,
+        "three-criteria-vs-density": cmd_three_criteria_vs_density,
+        "three-criteria-vs-K-multi-tau": cmd_three_criteria_vs_K_multi_tau,
+        "plot-from-csv": cmd_plot_from_csv,
     }
 
     if args.command in command_map:
