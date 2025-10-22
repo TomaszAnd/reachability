@@ -97,6 +97,25 @@ python -m reach.cli three-criteria-vs-K-multi-tau \
   --flush-every 10 --y unreachable
 ```
 
+**GEO2 ensemble** (geometric two-local Hamiltonians on lattices):
+```bash
+# GEO2 requires lattice parameters: --nx and --ny
+# Dimension = 2^(nx×ny), so 2×2 lattice → 4 qubits → d=16
+
+# K-sweep for 2×2 lattice (d=16)
+python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
+  --ensemble GEO2 -d 16 --k-max 10 \
+  --taus 0.99 --trials 100 --y unreachable \
+  --csv fig_summary/k16_geo2.csv
+
+# Optional: --periodic for periodic boundary conditions
+# python -m reach.cli --nx 2 --ny 2 --periodic three-criteria-vs-K-multi-tau ...
+
+# Verification: Check operator count L = 3n + 9|E|
+# For 2×2 open: n=4 sites, |E|=4 edges → L = 12 + 36 = 48 ✓
+# For 2×2 periodic: n=4 sites, |E|=8 edges → L = 12 + 72 = 84 ✓
+```
+
 ### Refreshing Plots from CSV (Streaming Mode)
 
 **While a long run is in progress**, you can peek at partial results:

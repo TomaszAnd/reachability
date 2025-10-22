@@ -19,7 +19,7 @@
 ### Key Features
 
 - **Time-free analysis**: No explicit time evolution required
-- **Random matrix ensembles**: GOE and GUE support
+- **Random matrix ensembles**: GOE, GUE, and GEO2 (geometric two-local on lattices) support
 - **Monte Carlo estimation**: Robust probability estimates with error bars
 - **Streaming mode**: CSV written incrementally, enables resumable runs and partial plotting
 - **Floor-aware plotting**: No vertical "cliffs" at display floor (1e-12)
@@ -53,6 +53,19 @@ python -m reach.cli three-criteria-vs-density \
   --y unreachable
 
 # Output: fig_summary/three_criteria_vs_density_GUE_tau0.95_unreachable.png
+```
+
+#### GEO2 Example (Geometric Lattice Ensemble)
+
+```bash
+# GEO2 on 2×2 lattice (4 qubits, d=16)
+python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
+  --ensemble GEO2 -d 16 --k-max 10 \
+  --taus 0.99 --trials 100 --y unreachable
+
+# GEO2 requires power-of-2 dimensions: d = 2^(nx×ny)
+# Use --nx, --ny to specify lattice shape
+# Optional: --periodic for periodic boundary conditions
 ```
 
 ### Plot from Existing CSV (No Recomputation)
