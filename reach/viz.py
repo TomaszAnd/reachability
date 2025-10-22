@@ -2360,7 +2360,10 @@ def plot_unreachability_K_multi_tau(
     # Define base color for spectral (use blue gradient)
     spectral_base = np.array([0.2, 0.4, 0.8])  # Blue RGB
     # Create gradient: light to dark for increasing tau
-    spectral_colors = [spectral_base * (0.4 + 0.6 * (i / (len(taus) - 1))) for i in range(len(taus))]
+    if len(taus) == 1:
+        spectral_colors = [spectral_base]  # Single color for single tau
+    else:
+        spectral_colors = [spectral_base * (0.4 + 0.6 * (i / (len(taus) - 1))) for i in range(len(taus))]
 
     # Plot spectral for each tau with gradient (floor-aware)
     for i, tau in enumerate(taus):
