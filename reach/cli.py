@@ -68,7 +68,7 @@ Examples:
     # Global options
     parser.add_argument(
         "--ensemble",
-        choices=["GOE", "GUE"],
+        choices=["GOE", "GUE", "GEO2"],
         default="GOE",
         help="Random matrix ensemble (default: GOE)",
     )
@@ -87,6 +87,17 @@ Examples:
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
     parser.add_argument(
         "--summary", action="store_true", help="Generate comprehensive summary reports"
+    )
+
+    # GEO2-specific lattice parameters
+    parser.add_argument(
+        "--nx", type=int, help="GEO2: Lattice width (number of sites in x direction)"
+    )
+    parser.add_argument(
+        "--ny", type=int, help="GEO2: Lattice height (number of sites in y direction)"
+    )
+    parser.add_argument(
+        "--periodic", action="store_true", help="GEO2: Use periodic boundary conditions"
     )
 
     # Create subcommands
@@ -337,7 +348,7 @@ Examples:
         "three-criteria-vs-K", help="Compare 3 criteria vs K (number of Hamiltonians)"
     )
     cmd_3crit_K.add_argument(
-        "--ensemble", choices=["GOE", "GUE"], required=True, help="Random matrix ensemble"
+        "--ensemble", choices=["GOE", "GUE", "GEO2"], required=True, help="Random matrix ensemble"
     )
     cmd_3crit_K.add_argument(
         "-d", "--dim", type=int, required=True, help="Hilbert space dimension (fixed)"
@@ -373,7 +384,7 @@ Examples:
         help="Compare 3 criteria vs density (K/d²) for multiple dimensions",
     )
     cmd_3crit_dens.add_argument(
-        "--ensemble", choices=["GOE", "GUE"], required=True, help="Random matrix ensemble"
+        "--ensemble", choices=["GOE", "GUE", "GEO2"], required=True, help="Random matrix ensemble"
     )
     cmd_3crit_dens.add_argument(
         "--dims",
@@ -434,7 +445,7 @@ Examples:
         help="K-sweep with multiple τ for spectral (shows gradient)",
     )
     cmd_3crit_K_multitau.add_argument(
-        "--ensemble", choices=["GOE", "GUE"], required=True, help="Random matrix ensemble"
+        "--ensemble", choices=["GOE", "GUE", "GEO2"], required=True, help="Random matrix ensemble"
     )
     cmd_3crit_K_multitau.add_argument(
         "-d", "--dim", type=int, required=True, help="Hilbert space dimension (fixed)"
@@ -533,6 +544,82 @@ def get_sampling_params(fast_mode: bool) -> tuple:
         return settings.FAST_SAMPLING
     else:
         return settings.FULL_SAMPLING
+
+
+def validate_geo2_params(args) -> dict:
+    """
+    Validate and extract GEO2 lattice parameters from command-line args.
+
+    For GEO2 ensemble:
+    - If --dim is provided, it must be a power of 2; infer nx, ny if not given
+    - If --nx and --ny are provided, validate dim = 2^(nx*ny)
+    - Fail fast with actionable error messages
+
+    Args:
+        args: Parsed command-line arguments
+
+    Returns:
+        dict with 'nx', 'ny', 'periodic' for GEO2; empty dict for GOE/GUE
+
+    Raises:
+        ValueError: If GEO2 parameters are inconsistent or missing
+    """
+    if args.ensemble != "GEO2":
+        return {}
+
+    nx = args.nx
+    ny = args.ny
+    periodic = args.periodic
+
+    # Case 1: Both nx and ny provided
+    if nx is not None and ny is not None:
+        n_sites = nx * ny
+        expected_dim = 2 ** n_sites
+
+        # If dim is also provided, validate consistency
+        if hasattr(args, 'dim') and args.dim is not None:
+            if args.dim != expected_dim:
+                raise ValueError(
+                    f"GEO2: Dimension mismatch. Lattice {nx}×{ny} = {n_sites} sites requires "
+                    f"dimension 2^{n_sites} = {expected_dim}, but --dim={args.dim} was given."
+                )
+
+        return {"nx": nx, "ny": ny, "periodic": periodic}
+
+    # Case 2: Only dim provided (for GEO2, try to infer square lattice)
+    if hasattr(args, 'dim') and args.dim is not None:
+        dim = args.dim
+
+        # Check if dim is a power of 2
+        if dim <= 0 or (dim & (dim - 1)) != 0:
+            raise ValueError(
+                f"GEO2: Dimension must be a power of 2 (got {dim}). "
+                f"Please provide --nx and --ny explicitly (e.g., --nx 3 --ny 3 for d=64)."
+            )
+
+        # Infer number of qubits
+        n_sites = int(np.log2(dim))
+
+        # If nx, ny not provided, fail with helpful message
+        if nx is None or ny is None:
+            # Suggest square lattice if possible
+            sqrt_n = int(np.sqrt(n_sites))
+            if sqrt_n * sqrt_n == n_sites:
+                raise ValueError(
+                    f"GEO2: For dimension {dim} = 2^{n_sites}, please specify lattice shape. "
+                    f"Suggestion: --nx {sqrt_n} --ny {sqrt_n} (square lattice)"
+                )
+            else:
+                raise ValueError(
+                    f"GEO2: For dimension {dim} = 2^{n_sites}, please specify lattice shape "
+                    f"with --nx and --ny (e.g., --nx {n_sites} --ny 1 for a chain)"
+                )
+
+    # Case 3: Missing parameters
+    raise ValueError(
+        "GEO2 ensemble requires either (1) --nx and --ny, or (2) --dim with --nx and --ny. "
+        "Example: --ensemble GEO2 --nx 3 --ny 3 --periodic"
+    )
 
 
 def cmd_landscape_S(args) -> None:
@@ -1108,6 +1195,9 @@ def cmd_three_criteria_vs_density(args) -> None:
             f"got dims={sorted(set(dims))}. This ensures publication-ready comparisons."
         )
 
+    # Validate and extract ensemble parameters (for GEO2)
+    ensemble_params = validate_geo2_params(args)
+
     # Compute sampling
     nks = int(np.sqrt(args.trials))
     nst = args.trials // nks
@@ -1117,6 +1207,8 @@ def cmd_three_criteria_vs_density(args) -> None:
         f"rho_max={args.rho_max}, rho_step={args.rho_step}, k_cap={args.k_cap}, "
         f"taus={taus}, trials={args.trials} (nks={nks}, nst={nst}), y={args.y}"
     )
+    if ensemble_params:
+        logger.info(f"  GEO2 lattice: nx={ensemble_params['nx']}, ny={ensemble_params['ny']}, periodic={ensemble_params['periodic']}")
 
     # Compute
     data = analysis.monte_carlo_unreachability_vs_density(
@@ -1129,6 +1221,7 @@ def cmd_three_criteria_vs_density(args) -> None:
         nks=nks,
         nst=nst,
         seed=args.seed,
+        **ensemble_params,
     )
 
     # CSV logging (if requested) - using streaming writer
@@ -1210,6 +1303,9 @@ def cmd_three_criteria_vs_K_multi_tau(args) -> None:
 
     taus = parse_comma_separated(args.taus, float)
 
+    # Validate and extract ensemble parameters (for GEO2)
+    ensemble_params = validate_geo2_params(args)
+
     # Compute sampling
     nks = int(np.sqrt(args.trials))
     nst = args.trials // nks
@@ -1218,6 +1314,8 @@ def cmd_three_criteria_vs_K_multi_tau(args) -> None:
         f"K-sweep multi-tau: d={args.dim}, k_max={args.k_max}, {args.ensemble}, "
         f"taus={taus}, trials={args.trials} (nks={nks}, nst={nst}), y={args.y}"
     )
+    if ensemble_params:
+        logger.info(f"  GEO2 lattice: nx={ensemble_params['nx']}, ny={ensemble_params['ny']}, periodic={ensemble_params['periodic']}")
 
     # Compute
     data = analysis.monte_carlo_unreachability_vs_K_multi_tau(
@@ -1228,6 +1326,7 @@ def cmd_three_criteria_vs_K_multi_tau(args) -> None:
         nks=nks,
         nst=nst,
         seed=args.seed,
+        **ensemble_params,
     )
 
     # CSV logging (if requested) - using streaming writer
