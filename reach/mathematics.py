@@ -326,3 +326,170 @@ def validate_quantum_state(state: qutip.Qobj, tolerance: float = 1e-10) -> bool:
     # Check normalization
     norm = state.norm()
     return abs(norm - 1.0) < tolerance
+
+
+def krylov_basis(
+    H: Union[qutip.Qobj, np.ndarray],
+    psi: Union[qutip.Qobj, np.ndarray],
+    m: int,
+    tol: float = settings.KRYLOV_BREAKDOWN_TOL,
+) -> np.ndarray:
+    """
+    Compute orthonormal basis of Krylov subspace via Arnoldi iteration.
+
+    Computes basis of span{ψ, Hψ, H²ψ, ..., H^(m-1)ψ} using modified
+    Gram-Schmidt orthogonalization.
+
+    PROVENANCE: Copied from jupyter_Project_Reachability/reach_bib.py::compute_Krylov_basis
+    with minimal adaptation (parameter renaming, input normalization, QuTiP compatibility).
+
+    Algorithm:
+    1. Normalize ψ → v₀
+    2. For i = 1, ..., m-1:
+       - Compute w = H @ v_{i-1}
+       - Orthogonalize w against {v₀, ..., v_{i-1}} (complex inner products)
+       - Normalize w → v_i
+       - If ||w|| < tol, Krylov space degenerates (rank < m), break early
+
+    Args:
+        H: Hamiltonian operator (d×d matrix, Hermitian)
+        psi: Initial state vector (d-dimensional ket)
+        m: Krylov subspace dimension (1 ≤ m ≤ d)
+        tol: Breakdown tolerance for rank detection (default: 1e-14)
+
+    Returns:
+        V: (d, m) matrix with orthonormal columns spanning Krylov subspace.
+           If breakdown occurs at iteration k < m, columns k:m are zero-padded.
+
+    Raises:
+        ValueError: If psi is zero vector or m out of range
+    """
+    # Extract numpy arrays from inputs (handle both np.ndarray and qutip.Qobj)
+    if isinstance(H, qutip.Qobj):
+        H_matrix = H.full()
+    else:
+        H_matrix = np.asarray(H)
+
+    if isinstance(psi, qutip.Qobj):
+        psi_vec = psi.full().flatten()
+    else:
+        psi_vec = np.asarray(psi).flatten()
+
+    # Validate inputs
+    d = H_matrix.shape[0]
+    if H_matrix.shape != (d, d):
+        raise ValueError(f"H must be square, got shape {H_matrix.shape}")
+
+    if len(psi_vec) != d:
+        raise ValueError(f"psi dimension {len(psi_vec)} != H dimension {d}")
+
+    psi_norm = np.linalg.norm(psi_vec)
+    if psi_norm == 0:
+        raise ValueError("Input vector psi must be non-zero.")
+
+    if not (1 <= m <= d):
+        raise ValueError(f"Krylov rank m={m} must be in range [1, {d}]")
+
+    # Initialize result matrix
+    result = np.empty((d, m), dtype=np.complex128)
+
+    # Normalize initial vector
+    result[:, 0] = psi_vec / psi_norm
+
+    # Arnoldi iteration (copied from jupyter_Project_Reachability/reach_bib.py)
+    for index in range(1, m):
+        # Multiply the previous basis vector with H
+        w = H_matrix @ result[:, index - 1]
+
+        # Orthogonalize against previous basis vectors
+        h = result[:, :index].conj().T @ w  # complex inner products
+        w = w - result[:, :index] @ h
+
+        htilde = np.linalg.norm(w)
+        # Handle near-zero vectors (Krylov space degenerates)
+        if htilde < tol:
+            # Subspace has degenerated; return the basis so far
+            logger.debug(f"Krylov breakdown at iteration {index}, m={m}, rank={index}")
+            result[:, index:] = 0  # fill remaining with zeros
+            break
+        result[:, index] = w / htilde
+
+    # QR compression for numerical stability
+    Q, _ = np.linalg.qr(result, mode="reduced")
+    return Q
+
+
+def is_unreachable_krylov(
+    H: Union[qutip.Qobj, np.ndarray],
+    psi: Union[qutip.Qobj, np.ndarray],
+    phi: Union[qutip.Qobj, np.ndarray],
+    m: int,
+    rank_tol: float = settings.KRYLOV_RANK_TOL,
+    proj_tol: float = 1e-10,
+) -> bool:
+    """
+    Check unreachability via Krylov projection-residual criterion.
+
+    Mathematical criterion:
+    - Krylov subspace K_m(H, ψ) = span{ψ, Hψ, ..., H^(m-1)ψ}
+    - φ is reachable from ψ iff φ ∈ K_m(H, ψ)
+    - Primary test: ‖φ - V(V†φ)‖ ≤ proj_tol (projection-residual)
+    - Fallback test: rank(V) == rank([V | φ]) (rank comparison)
+
+    The projection-residual test is numerically stable and geometrically direct:
+    it measures the distance from φ to the Krylov subspace. Small residual
+    (≪ 1) indicates membership; residual ≈ 1 indicates non-membership.
+
+    Rank comparison is kept as a fallback for edge cases near the tolerance
+    boundary, but the projection test is the primary decision criterion.
+
+    Args:
+        H: Hamiltonian operator (d×d)
+        psi: Initial state (d-dim)
+        phi: Target state (d-dim)
+        m: Krylov rank to test (1 ≤ m ≤ d)
+        rank_tol: Numerical tolerance for matrix_rank fallback (default: 1e-8)
+        proj_tol: Projection residual tolerance (default: 1e-10)
+
+    Returns:
+        True if φ is UNREACHABLE (φ ∉ K_m)
+        False if φ is REACHABLE (φ ∈ K_m)
+
+    Raises:
+        ValueError: If inputs are malformed
+    """
+    # Compute Krylov basis
+    try:
+        V = krylov_basis(H, psi, m)
+    except ValueError as e:
+        logger.warning(f"Krylov basis computation failed: {e}")
+        return False  # Conservative: assume reachable if computation fails
+
+    # Extract phi as column vector
+    if isinstance(phi, qutip.Qobj):
+        phi_vec = phi.full().flatten()
+    else:
+        phi_vec = np.asarray(phi).flatten()
+
+    # PRIMARY TEST: Projection-residual criterion
+    # Compute orthogonal projection of φ onto K_m: proj = V(V†φ)
+    proj = V @ (V.conj().T @ phi_vec)
+
+    # Compute residual: r = φ - proj
+    resid = phi_vec - proj
+    resid_norm = np.linalg.norm(resid)
+
+    # If residual is large, φ is outside K_m (unreachable)
+    if resid_norm > proj_tol:
+        return True  # Unreachable: φ ∉ K_m
+
+    # FALLBACK TEST: Rank comparison (for edge cases near tolerance)
+    # This is kept for numerical safety but should rarely trigger
+    phi_col = phi_vec.reshape(-1, 1)
+    V_aug = np.concatenate([V, phi_col], axis=1)
+
+    rank_V = np.linalg.matrix_rank(V, tol=rank_tol)
+    rank_V_aug = np.linalg.matrix_rank(V_aug, tol=rank_tol)
+
+    # Return True if unreachable (rank increased)
+    return rank_V < rank_V_aug

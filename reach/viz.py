@@ -63,6 +63,26 @@ plt.rcParams["savefig.dpi"] = settings.DEFAULT_DPI
 plt.rcParams["savefig.bbox"] = "tight"
 
 
+def _create_floor_masked_array(y_values: np.ndarray, floor: float) -> np.ma.MaskedArray:
+    """
+    Create a masked array that breaks line segments at floor values.
+
+    This prevents matplotlib from drawing vertical "cliff" lines when values
+    hit the display floor. Floored points will be plotted separately as
+    faded markers without connecting lines.
+
+    Args:
+        y_values: Array of y values (probabilities)
+        floor: Display floor value
+
+    Returns:
+        Masked array where floor values are masked
+    """
+    # Mask values at or near the floor (within 1% tolerance)
+    is_floored = np.abs(y_values - floor) < floor * 0.01
+    return np.ma.masked_where(is_floored, y_values)
+
+
 def ensure_dir(path: str) -> None:
     """
     Ensure directory exists, creating it if necessary.
@@ -71,6 +91,109 @@ def ensure_dir(path: str) -> None:
         path: Directory path to create
     """
     os.makedirs(path, exist_ok=True)
+
+
+def _wilson_interval(k: int, n: int, z: float = 1.0) -> Tuple[float, float]:
+    """
+    Compute Wilson score interval for binomial proportion k/n.
+
+    The Wilson interval provides better coverage near boundaries (p ≈ 0 or p ≈ 1)
+    compared to the normal approximation (Wald interval). For z=1.0, this
+    approximates a 68% confidence interval (≈1σ).
+
+    Mathematical formula:
+        p̂ = k/n
+        denom = 1 + z²/n
+        center = (p̂ + z²/(2n)) / denom
+        margin = (z/denom) × √(p̂(1-p̂)/n + z²/(4n²))
+        interval = [max(0, center - margin), min(1, center + margin)]
+
+    Args:
+        k: Number of successes (0 ≤ k ≤ n)
+        n: Number of trials (n > 0)
+        z: Z-score for confidence level (default: 1.0 for ≈68% CI)
+
+    Returns:
+        (lower_bound, upper_bound) both in [0, 1]
+
+    References:
+        Wilson, E.B. (1927). "Probable inference, the law of succession, and
+        statistical inference". Journal of the American Statistical Association.
+    """
+    if n == 0:
+        return 0.0, 0.0
+
+    phat = k / n
+    denom = 1 + z * z / n
+    center = (phat + z * z / (2 * n)) / denom
+    margin = (z / denom) * np.sqrt((phat * (1 - phat) / n) + (z * z / (4 * n * n)))
+
+    lower = max(0.0, center - margin)
+    upper = min(1.0, center + margin)
+
+    return lower, upper
+
+
+def _compute_asymmetric_errorbars(
+    p: np.ndarray, n: int, floor: float = settings.DISPLAY_FLOOR, z: float = 1.0
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Compute asymmetric error bars for probabilities using Wilson intervals.
+
+    Error bars are floor-aware and hidden when meaningless (k=0, k=n, or p≤floor).
+
+    Args:
+        p: Array of probabilities (each in [0, 1])
+        n: Total number of trials (same for all p values)
+        floor: Display floor for log plots (default: settings.DISPLAY_FLOOR)
+        z: Z-score for Wilson interval (default: 1.0)
+
+    Returns:
+        (err_lower, err_upper): Arrays of asymmetric error bar sizes
+        where err_lower[i] = p[i] - lower[i] and err_upper[i] = upper[i] - p[i]
+        Hidden bars (p≤floor, k=0, k=n) have err_lower=err_upper=0
+    """
+    err_lower = np.zeros_like(p)
+    err_upper = np.zeros_like(p)
+
+    for i, prob in enumerate(p):
+        # Infer success count from probability
+        k = int(round(prob * n))
+
+        # Hide error bars when meaningless
+        if prob <= floor or k == 0 or k == n or n < 5:
+            continue  # Leave as zero (no error bar)
+
+        # Compute Wilson interval
+        lo, hi = _wilson_interval(k, n, z=z)
+
+        # Floor-aware clipping: lower bound cannot go below floor
+        lo = max(lo, floor)
+
+        # Asymmetric error bar sizes
+        err_lower[i] = prob - lo
+        err_upper[i] = hi - prob
+
+    return err_lower, err_upper
+
+
+def _to_nines(p: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """
+    Convert probability to "nines" scale: y = -log₁₀(1 - p).
+
+    This scale makes values close to 1 more visible. For example:
+    - p = 0.9 → y ≈ 1 (one nine)
+    - p = 0.99 → y ≈ 2 (two nines)
+    - p = 0.999 → y ≈ 3 (three nines)
+
+    Args:
+        p: Probability array (values in [0, 1])
+        eps: Epsilon floor to avoid inf when p=1 (default: 1e-8)
+
+    Returns:
+        Transformed values on nines scale
+    """
+    return -np.log10(np.clip(1.0 - p, eps, 1.0))
 
 
 def apply_masked_connections(
@@ -158,17 +281,38 @@ def plot_landscape_S2D(
 
     fig, ax = plt.subplots(figsize=settings.DEFAULT_FIGSIZE)
 
-    # Create heatmap
-    im = ax.pcolormesh(L1, L2, S_clipped, cmap=settings.DEFAULT_COLORMAP, shading="auto")
+    # Extract axis limits from meshgrid
+    lambda_min = L1[0, 0]
+    lambda_max = L1[0, -1]
+
+    # Create heatmap with imshow (no interpolation for exact pixel rendering)
+    im = ax.imshow(
+        S_clipped,
+        cmap=settings.DEFAULT_COLORMAP,
+        interpolation="none",
+        origin="lower",
+        extent=[lambda_min, lambda_max, lambda_min, lambda_max],
+        aspect="equal",
+    )
 
     # Add colorbar
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label("S(λ₁,λ₂)", fontsize=12)
 
+    # Add crosshairs at λ₁=0 and λ₂=0
+    ax.axhline(0, color="gray", linestyle=":", linewidth=1, alpha=0.6, zorder=10)
+    ax.axvline(0, color="gray", linestyle=":", linewidth=1, alpha=0.6, zorder=10)
+
     # Labels and title
     ax.set_xlabel("λ₁", fontsize=12)
     ax.set_ylabel("λ₂", fontsize=12)
     ax.set_title(f"S(λ₁,λ₂) — {ensemble}, d={d}, k={k} (2D)", fontsize=14)
+
+    # Set symmetric ticks
+    tick_vals = [-1.0, -0.5, 0.0, 0.5, 1.0]
+    tick_vals_in_range = [t for t in tick_vals if lambda_min <= t <= lambda_max]
+    ax.set_xticks(tick_vals_in_range)
+    ax.set_yticks(tick_vals_in_range)
 
     # Annotate min/max values and grid info
     s_min, s_max = np.min(S_clipped), np.max(S_clipped)
@@ -184,7 +328,7 @@ def plot_landscape_S2D(
     )
 
     # Grid for better readability
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.3, linewidth=0.5)
 
     plt.tight_layout()
 
@@ -251,9 +395,17 @@ def plot_landscape_S3D(
     fig = plt.figure(figsize=(12, 9))
     ax = fig.add_subplot(111, projection="3d")
 
-    # Create 3D surface
+    # Create 3D surface with raw mesh (no interpolation)
     surf = ax.plot_surface(
-        L1, L2, S_clipped, cmap=settings.DEFAULT_COLORMAP, alpha=0.9, linewidth=0, antialiased=True
+        L1,
+        L2,
+        S_clipped,
+        cmap=settings.DEFAULT_COLORMAP,
+        alpha=0.9,
+        linewidth=0,
+        antialiased=True,
+        rstride=1,
+        cstride=1,
     )
 
     # Add colorbar
@@ -361,7 +513,7 @@ def plot_tau_histograms(
         # Position bars for this dimension
         x_pos = x + (i - n_dims / 2 + 0.5) * width
 
-        bars = ax.bar(
+        _ = ax.bar(  # plotted bars; result unused (silence F841)
             x_pos, probs, width, label=f"d={d}", color=colors[i], yerr=errors, capsize=3, alpha=0.8
         )
 
@@ -385,6 +537,125 @@ def plot_tau_histograms(
 
     logger.info(f"Saved tau histogram: {filepath}")
     return [filepath]
+
+
+def plot_unreach_vs_k_single_d(
+    data: Dict[str, np.ndarray],
+    d: int,
+    ensemble: str,
+    tau: float,
+    output_dir: Optional[str] = None,
+    y_floor: float = 1e-8,
+) -> str:
+    """
+    Plot P(unreachability) vs K for a single fixed dimension.
+
+    Creates a line plot with error bars showing unreachability probability as a
+    function of K (number of Hamiltonians) for a fixed dimension d and threshold τ.
+
+    Uses masked connections to avoid vertical artifacts when probabilities hit the floor.
+
+    Args:
+        data: Dictionary with keys 'k' (K values), 'p' (probabilities), 'err' (SEM)
+        d: Hilbert space dimension (fixed)
+        ensemble: "GOE" or "GUE"
+        tau: Unreachability threshold
+        output_dir: Directory for saving figure
+        y_floor: Display floor for log scale (default: 1e-8)
+
+    Returns:
+        Path to saved figure
+    """
+    if output_dir is None:
+        output_dir = settings.FIG_SUMMARY_DIR
+    ensure_dir(output_dir)
+
+    ks = data["k"]
+    probs = data["p"]
+    errs = data["err"]
+
+    fig, ax = plt.subplots(figsize=settings.DEFAULT_FIGSIZE)
+
+    # Clamp probabilities to [y_floor, 1] for display
+    probs_display = np.clip(probs, y_floor, 1.0)
+
+    # Use log scale for y-axis
+    probs_log = np.log10(probs_display)
+
+    # Plot with masked connections (don't connect floored points)
+    apply_masked_connections(
+        ax,
+        ks,
+        probs,
+        floor=y_floor,
+        color="steelblue",
+        linewidth=2.5,
+        marker="o",
+        markersize=7,
+        label=f"d={d}, τ={tau}",
+    )
+
+    # Add error bars separately (only for non-floored points)
+    is_floored = probs <= y_floor
+    for i, k in enumerate(ks):
+        if not is_floored[i]:
+            # Convert SEM to log space for error bars
+            p_lower = max(probs[i] - errs[i], y_floor)
+            p_upper = min(probs[i] + errs[i], 1.0)
+            err_lower = np.log10(probs[i]) - np.log10(p_lower)
+            err_upper = np.log10(p_upper) - np.log10(probs[i])
+            ax.errorbar(
+                k,
+                probs_log[i],
+                yerr=[[err_lower], [err_upper]],
+                fmt="none",
+                color="steelblue",
+                capsize=4,
+                capthick=1.5,
+                alpha=0.7,
+            )
+
+    # Configure axes
+    ax.set_xlabel("K (Number of Hamiltonians)", fontsize=12)
+    ax.set_ylabel("log₁₀(P(unreachability))", fontsize=12)
+    ax.set_title(f"P(unreachability) vs K — {ensemble}, d={d}, τ={tau}", fontsize=14)
+
+    # Set y-axis limits and ticks for log scale
+    ax.set_ylim(np.log10(y_floor), 0)  # [log(y_floor), log(1)] = [log(y_floor), 0]
+    y_ticks = [1e-8, 1e-6, 1e-4, 1e-2, 1e0]
+    y_ticks_in_range = [yt for yt in y_ticks if y_floor <= yt <= 1.0]
+    ax.set_yticks([np.log10(yt) for yt in y_ticks_in_range])
+    ax.set_yticklabels([f"{yt:.0e}" if yt < 1 else "1" for yt in y_ticks_in_range])
+
+    # Set x-axis ticks to integer K values
+    ax.set_xticks(ks)
+    ax.set_xlim(ks[0] - 0.5, ks[-1] + 0.5)
+
+    ax.legend(fontsize=11, loc="best")
+    ax.grid(True, alpha=0.3)
+
+    # Annotate floor value
+    ax.text(
+        0.98,
+        0.02,
+        f"Floor: {y_floor:.0e}",
+        transform=ax.transAxes,
+        fontsize=9,
+        ha="right",
+        va="bottom",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.7),
+    )
+
+    plt.tight_layout()
+
+    # Save with exact filename
+    filename = f"unreachability_vs_k_single_d_{ensemble}_d{d}_tau{tau:.2f}.png"
+    filepath = os.path.join(output_dir, filename)
+    plt.savefig(filepath, dpi=settings.DEFAULT_DPI, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"Saved single-d K sweep: {filepath}")
+    return filepath
 
 
 def plot_optimizer_comparison(
@@ -838,6 +1109,194 @@ def plot_rank_comparison(
     return filepath
 
 
+def plot_rank_comparison_with_inset(
+    old_results: Dict[Tuple[int, int], float],
+    new_results: Dict[Tuple[int, int], float],
+    dims: List[int],
+    ensemble: str,
+    tau: float,
+    output_dir: Optional[str] = None,
+    y_floor: float = 1e-8,
+    zoom_xlim: Tuple[float, float] = (1, 6),
+    zoom_ylim: Tuple[float, float] = (1e-8, 3e-2),
+) -> str:
+    """
+    Plot old vs new criterion comparison with zoomed inset.
+
+    Creates a main plot with full data range and adds a zoomed inset focusing on
+    low-k, low-probability region. Includes a box indicator on the main plot showing
+    the inset region.
+
+    Args:
+        old_results: Dictionary mapping (d,k) → probability (old criterion, τ-free)
+        new_results: Dictionary mapping (d,k) → probability (new criterion, uses τ)
+        dims: List of dimensions to plot
+        ensemble: "GOE" or "GUE"
+        tau: Threshold value used by new criterion
+        output_dir: Directory for saving figures
+        y_floor: Display floor for log scale in inset (default: 1e-8)
+        zoom_xlim: X-axis limits for inset zoom (default: (1, 6))
+        zoom_ylim: Y-axis limits for inset zoom in log scale (default: (1e-8, 3e-2))
+
+    Returns:
+        Path to saved figure
+    """
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
+
+    output_dir = output_dir or settings.FIG_SUMMARY_DIR
+    ensure_dir(output_dir)
+
+    # Log τ audit information
+    logger.info("[rank-compare-zoom] old_uses_tau=False")
+    logger.info(f"[rank-compare-zoom] new_tau={tau}")
+
+    # Create main figure
+    fig, ax = plt.subplots(1, 1, figsize=(14, 9))
+    colors = plt.cm.viridis(np.linspace(0, 1, len(dims)))
+
+    # Plot old and new criteria on main axes
+    for idx, d in enumerate(dims):
+        # Old criterion (τ-free)
+        points_old = [(k, p) for (dim, k), p in old_results.items() if dim == d]
+        if points_old:
+            points_old.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_old)
+            apply_masked_connections(
+                ax,
+                np.array(ks),
+                np.array(ps),
+                floor=y_floor,
+                color=colors[idx],
+                label=f"d={d} (old)",
+                linewidth=2,
+                marker="o",
+                markersize=6,
+            )
+
+        # New criterion (uses τ)
+        points_new = [(k, p) for (dim, k), p in new_results.items() if dim == d]
+        if points_new:
+            points_new.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_new)
+            apply_masked_connections(
+                ax,
+                np.array(ks),
+                np.array(ps),
+                floor=y_floor,
+                color=colors[idx],
+                label=f"d={d} (new)",
+                linewidth=1.5,
+                marker="s",
+                markersize=5,
+                linestyle="--",
+                alpha=0.7,
+            )
+
+    # Configure main axes
+    ks_all = sorted({k for (_, k) in old_results.keys()} | {k for (_, k) in new_results.keys()})
+    ax.set_xlabel("k (Number of Hamiltonians)", fontsize=12)
+    ax.set_ylabel("log₁₀(P(detected unreachability))", fontsize=12)
+    ax.set_title(f"Old vs New Criterion with Zoom — {ensemble} (τ={tau:.3f})", fontsize=14)
+    ax.legend(ncol=3, fontsize=9, loc="upper right", framealpha=0.85)
+    ax.grid(True, alpha=0.3)
+
+    if ks_all:
+        ax.set_xlim(min(ks_all) - 0.2, max(ks_all) + 0.2)
+        ax.set_xticks(ks_all)
+
+    # Main y-axis: log scale from floor to 1
+    ax.set_ylim(np.log10(y_floor), 0)
+    y_ticks_main = [1e-8, 1e-6, 1e-4, 1e-2, 1e0]
+    y_ticks_main_in_range = [yt for yt in y_ticks_main if y_floor <= yt <= 1.0]
+    ax.set_yticks([np.log10(yt) for yt in y_ticks_main_in_range])
+    ax.set_yticklabels([f"{yt:.0e}" if yt < 1 else "1" for yt in y_ticks_main_in_range])
+
+    # Add τ annotation
+    ax.text(
+        0.02,
+        0.98,
+        f"old: τ-free; new: τ={tau:.3f}",
+        transform=ax.transAxes,
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        ha="left",
+        va="top",
+    )
+
+    # Create inset axes (positioned in lower left)
+    axins = inset_axes(ax, width="35%", height="35%", loc="lower left", borderpad=2.5)
+
+    # Plot data on inset with same styling
+    for idx, d in enumerate(dims):
+        # Old criterion
+        points_old = [(k, p) for (dim, k), p in old_results.items() if dim == d]
+        if points_old:
+            points_old.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_old)
+            apply_masked_connections(
+                axins,
+                np.array(ks),
+                np.array(ps),
+                floor=y_floor,
+                color=colors[idx],
+                linewidth=2,
+                marker="o",
+                markersize=5,
+            )
+
+        # New criterion
+        points_new = [(k, p) for (dim, k), p in new_results.items() if dim == d]
+        if points_new:
+            points_new.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_new)
+            apply_masked_connections(
+                axins,
+                np.array(ks),
+                np.array(ps),
+                floor=y_floor,
+                color=colors[idx],
+                linewidth=1.5,
+                marker="s",
+                markersize=4,
+                linestyle="--",
+                alpha=0.7,
+            )
+
+    # Configure inset axes (zoomed region)
+    axins.set_xlim(zoom_xlim)
+    axins.set_ylim(np.log10(zoom_ylim[0]), np.log10(zoom_ylim[1]))
+
+    # Inset y-ticks
+    y_ticks_inset = [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
+    y_ticks_inset_in_range = [
+        yt for yt in y_ticks_inset if zoom_ylim[0] <= yt <= zoom_ylim[1]
+    ]
+    axins.set_yticks([np.log10(yt) for yt in y_ticks_inset_in_range])
+    axins.set_yticklabels([f"{yt:.0e}" for yt in y_ticks_inset_in_range], fontsize=8)
+
+    # Inset x-ticks
+    x_ticks_inset = list(range(int(zoom_xlim[0]), int(zoom_xlim[1]) + 1))
+    axins.set_xticks(x_ticks_inset)
+    axins.set_xticklabels([str(xt) for xt in x_ticks_inset], fontsize=8)
+
+    axins.grid(True, alpha=0.3, linewidth=0.5)
+    axins.tick_params(labelsize=8)
+
+    # Draw box on main plot showing zoom region
+    mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="gray", linestyle="--", linewidth=1.5)
+
+    plt.tight_layout()
+
+    # Save with exact filename including _zoom suffix
+    filename = f"unreachability_vs_rank_old_vs_new_{ensemble}_tau{tau:.3f}_zoom.png"
+    filepath = os.path.join(output_dir, filename)
+    plt.savefig(filepath, dpi=settings.DEFAULT_DPI, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"Saved rank comparison with zoom: {filepath}")
+    return filepath
+
+
 def plot_tau_histograms_multiD(
     tau_data: Dict[int, Dict[str, np.ndarray]],
     k: int,
@@ -1174,4 +1633,958 @@ def plot_iter_sweep_multiD(
     plt.close()
 
     logger.info(f"Saved multi-D iteration sweeps: {filepath}")
+    return filepath
+
+
+def plot_rank_comparison_rescaled(
+    old_results: Dict[Tuple[int, int], float],
+    new_results: Dict[Tuple[int, int], float],
+    dims: List[int],
+    ensemble: str,
+    tau: float,
+    output_dir: Optional[str] = None,
+    eps_floor: float = 1e-9,
+    legend_loc: str = "lower left",
+    hide_floored: bool = True,
+) -> str:
+    """
+    Plot old vs new criterion comparison using log10(P) scale (no inset).
+
+    Y-axis dynamically trimmed to data range. Legend placed at bottom to avoid
+    occluding data.
+
+    Args:
+        old_results: Dictionary mapping (d,k) → probability (old criterion, τ-free)
+        new_results: Dictionary mapping (d,k) → probability (new criterion, uses τ)
+        dims: List of dimensions to plot
+        ensemble: "GOE" or "GUE"
+        tau: Threshold value used by new criterion
+        output_dir: Directory for saving figures (default: fig_summary)
+        eps_floor: Epsilon floor to avoid log10(0) (default: 1e-9)
+        legend_loc: Legend location (default: "lower left")
+        hide_floored: If True, hide points with p <= eps_floor (default: True)
+
+    Returns:
+        Path to saved figure
+
+    Note:
+        Filename format: unreachability_vs_rank_old_vs_new_{ensemble}_tau{τ:.3f}.png
+        (no _zoom suffix, unlike plot_rank_comparison_with_inset)
+    """
+    output_dir = output_dir or settings.FIG_SUMMARY_DIR
+    ensure_dir(output_dir)
+
+    # Log τ audit information
+    logger.info("[rank-compare-rescaled] old_uses_tau=False")
+    logger.info(f"[rank-compare-rescaled] new_tau={tau}")
+
+    # Create figure
+    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    colors = plt.cm.viridis(np.linspace(0, 1, len(dims)))
+
+    # Collect all log10 values from visible (non-hidden) points to determine y-axis range
+    all_log_values = []
+    hidden_count_old = 0
+    hidden_count_new = 0
+
+    # Plot old and new criteria
+    for idx, d in enumerate(dims):
+        # Old criterion (τ-free)
+        points_old = [(k, p) for (dim, k), p in old_results.items() if dim == d]
+        if points_old:
+            points_old.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_old)
+            ks = np.array(ks)
+            ps = np.array(ps)
+
+            # Filter out floored points if requested
+            if hide_floored:
+                mask = ps > eps_floor
+                ks_visible = ks[mask]
+                ps_visible = ps[mask]
+                hidden_count_old += np.sum(~mask)
+            else:
+                ks_visible = ks
+                ps_visible = np.maximum(ps, eps_floor)
+
+            if len(ks_visible) > 0:
+                y_old = np.log10(ps_visible)
+                all_log_values.extend(y_old)
+
+                # Plot with line segments broken at hidden points
+                if hide_floored and np.sum(~mask) > 0:
+                    # Plot segments separately to break lines at hidden points
+                    segments = []
+                    current_seg_k = []
+                    current_seg_y = []
+                    for i, visible in enumerate(mask):
+                        if visible:
+                            current_seg_k.append(ks[i])
+                            current_seg_y.append(np.log10(ps[i]))
+                        else:
+                            if current_seg_k:
+                                segments.append((np.array(current_seg_k), np.array(current_seg_y)))
+                                current_seg_k = []
+                                current_seg_y = []
+                    if current_seg_k:
+                        segments.append((np.array(current_seg_k), np.array(current_seg_y)))
+
+                    for seg_idx, (seg_k, seg_y) in enumerate(segments):
+                        ax.plot(seg_k, seg_y, color=colors[idx],
+                               label=f"d={d} (old)" if seg_idx == 0 else None,
+                               linewidth=2, marker="o", markersize=6, linestyle="-")
+                else:
+                    ax.plot(ks_visible, y_old, color=colors[idx], label=f"d={d} (old)",
+                           linewidth=2, marker="o", markersize=6, linestyle="-")
+
+        # New criterion (uses τ)
+        points_new = [(k, p) for (dim, k), p in new_results.items() if dim == d]
+        if points_new:
+            points_new.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_new)
+            ks = np.array(ks)
+            ps = np.array(ps)
+
+            # Filter out floored points if requested
+            if hide_floored:
+                mask = ps > eps_floor
+                ks_visible = ks[mask]
+                ps_visible = ps[mask]
+                hidden_count_new += np.sum(~mask)
+            else:
+                ks_visible = ks
+                ps_visible = np.maximum(ps, eps_floor)
+
+            if len(ks_visible) > 0:
+                y_new = np.log10(ps_visible)
+                all_log_values.extend(y_new)
+
+                # Plot with line segments broken at hidden points
+                if hide_floored and np.sum(~mask) > 0:
+                    # Plot segments separately to break lines at hidden points
+                    segments = []
+                    current_seg_k = []
+                    current_seg_y = []
+                    for i, visible in enumerate(mask):
+                        if visible:
+                            current_seg_k.append(ks[i])
+                            current_seg_y.append(np.log10(ps[i]))
+                        else:
+                            if current_seg_k:
+                                segments.append((np.array(current_seg_k), np.array(current_seg_y)))
+                                current_seg_k = []
+                                current_seg_y = []
+                    if current_seg_k:
+                        segments.append((np.array(current_seg_k), np.array(current_seg_y)))
+
+                    for seg_idx, (seg_k, seg_y) in enumerate(segments):
+                        ax.plot(seg_k, seg_y, color=colors[idx],
+                               label=f"d={d} (new)" if seg_idx == 0 else None,
+                               linewidth=1.5, marker="s", markersize=5, linestyle="--", alpha=0.7)
+                else:
+                    ax.plot(ks_visible, y_new, color=colors[idx], label=f"d={d} (new)",
+                           linewidth=1.5, marker="s", markersize=5, linestyle="--", alpha=0.7)
+
+    # Log and annotate hidden points
+    hidden_total = hidden_count_old + hidden_count_new
+    if hide_floored and hidden_total > 0:
+        logger.info(
+            f"[rank-compare] hidden {hidden_total} floored points @ eps_floor={eps_floor} "
+            f"(old={hidden_count_old}, new={hidden_count_new})"
+        )
+
+    # Configure axes
+    ks_all = sorted({k for (_, k) in old_results.keys()} | {k for (_, k) in new_results.keys()})
+    ax.set_xlabel("k (Number of Hamiltonians)", fontsize=12)
+    ax.set_ylabel("log₁₀(P(detected unreachability))", fontsize=12)
+    ax.set_title(f"Old vs New Criterion — {ensemble} (τ={tau:.3f})", fontsize=14)
+    ax.grid(True, alpha=0.3)
+
+    # X-axis: integer ticks for k
+    if ks_all:
+        ax.set_xlim(min(ks_all) - 0.2, max(ks_all) + 0.2)
+        ax.set_xticks(ks_all)
+
+    # Y-axis: dynamically trim based on data
+    # ymin = max(10^floor(log10(min_p)), 1e-9) → ymin_log = max(floor(log10(min_p)), -9)
+    if all_log_values:
+        y_min_data = min(all_log_values)
+        y_min = max(np.floor(y_min_data), -9)
+        # Y-max: small headroom above max visible probability
+        y_max = min(0, max(all_log_values) + 0.05)
+    else:
+        y_min = -9
+        y_max = 0
+
+    ax.set_ylim(y_min, y_max)
+
+    # Y-axis ticks: use scientific notation
+    y_ticks = []
+    y_tick_labels = []
+    for exp in range(int(np.floor(y_min)), 1):
+        y_ticks.append(exp)
+        if exp == 0:
+            y_tick_labels.append("1")
+        else:
+            y_tick_labels.append(f"10^{exp}")
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_tick_labels)
+
+    # Legend at specified location
+    ax.legend(ncol=2, fontsize=9, loc=legend_loc, framealpha=0.85)
+
+    # Add annotation in top-left corner
+    ax.text(
+        0.02,
+        0.98,
+        f"old: τ-free; new: τ={tau:.3f}",
+        transform=ax.transAxes,
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        ha="left",
+        va="top",
+    )
+
+    # Add hidden points warning if any were hidden
+    if hide_floored and hidden_total > 0:
+        ax.text(
+            0.02,
+            0.92,
+            f"⚠ hidden {hidden_total} floored points (see logs)",
+            transform=ax.transAxes,
+            fontsize=8,
+            bbox=dict(boxstyle="round", facecolor="yellow", alpha=0.6),
+            ha="left",
+            va="top",
+        )
+
+    # Save figure
+    filename = f"unreachability_vs_rank_old_vs_new_{ensemble}_tau{tau:.3f}.png"
+    filepath = os.path.join(output_dir, filename)
+    plt.savefig(filepath, dpi=settings.DEFAULT_DPI, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"Saved rank comparison (rescaled): {filepath}")
+    return filepath
+
+
+def plot_unreachability_three_criteria_vs_m(
+    data: Dict[str, np.ndarray],
+    ensemble: str,
+    d: int,
+    K: int,
+    tau: float,
+    outdir: str = ".",
+    floor: float = settings.DISPLAY_FLOOR,
+    trials: Optional[int] = None,
+) -> str:
+    """
+    Plot P(unreachability) vs Krylov rank m for 3 criteria (overlay).
+
+    Creates log-scale plot with:
+    - X-axis: Krylov rank m
+    - Y-axis: P(unreachability) (log scale)
+    - 3 curves with floor-aware asymmetric error bars (spectral, old, Krylov)
+    - Floor-masked connections for DISPLAY_FLOOR values
+
+    Args:
+        data: Output from monte_carlo_unreachability_vs_m
+        ensemble: "GOE" or "GUE"
+        d: Hilbert space dimension
+        K: Number of Hamiltonians
+        tau: Threshold (for spectral only)
+        outdir: Output directory
+        floor: Display floor for log plot masking
+        trials: Total number of trials (nks × nst) for error bar computation
+
+    Returns:
+        Path to saved figure
+
+    Styling:
+    - Markers: 'o' (spectral), 's' (old), '^' (Krylov)
+    - Colors: From default palette (C0, C1, C2)
+    - Line style: '--' (dashed)
+    - Legend: "Spectral overlap (τ=X)", "Old criterion", "Krylov rank"
+    - Title: f"P(unreachability) vs Krylov rank m | {ensemble}, d={d}, K={K}"
+    - Filename: f"unreachability_vs_rank_three_{ensemble}_d{d}_K{K}_tau{tau:.2f}.png"
+    """
+    ensure_dir(outdir)
+
+    fig, ax = plt.subplots(figsize=settings.DEFAULT_FIGSIZE)
+
+    m = data["m"]
+
+    # Define styling for each criterion
+    styles = {
+        "spectral": {"marker": "o", "color": "C0", "label": f"Spectral overlap (τ={tau:.2f})"},
+        "old": {"marker": "s", "color": "C1", "label": "Old criterion"},
+        "krylov": {"marker": "^", "color": "C2", "label": "Krylov rank"},
+    }
+
+    # Plot each criterion if present
+    for criterion, style in styles.items():
+        p_key = f"p_{criterion}"
+        err_key = f"err_{criterion}"
+
+        if p_key in data and err_key in data:
+            p = data[p_key]
+
+            # Plot line with markers (no error bars yet)
+            ax.plot(
+                m,
+                p,
+                marker=style["marker"],
+                color=style["color"],
+                label=style["label"],
+                linestyle="--",
+                markersize=6,
+                linewidth=1.5,
+            )
+
+            # Add asymmetric Wilson error bars if trials is provided
+            if trials is not None and trials > 0:
+                err_lower, err_upper = _compute_asymmetric_errorbars(p, trials, floor=floor)
+                yerr = np.vstack([err_lower, err_upper])
+
+                # Only plot error bars where they are non-zero
+                has_errbar = (err_lower > 0) | (err_upper > 0)
+                if np.any(has_errbar):
+                    ax.errorbar(
+                        m[has_errbar],
+                        p[has_errbar],
+                        yerr=yerr[:, has_errbar],
+                        fmt="none",
+                        color=style["color"],
+                        capsize=3,
+                        linewidth=1,
+                        alpha=0.7,
+                    )
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Krylov rank $m$", fontsize=12)
+    ax.set_ylabel(r"$\log_{10} P(\mathrm{unreachable})$", fontsize=12)
+    ax.set_title(
+        f"P(unreachability) vs Krylov rank $m$ | {ensemble}, $d={d}$, $K={K}$", fontsize=13
+    )
+    ax.legend(loc="best", fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    # Add annotation box with parameters
+    annotation_text = f"Ensemble: {ensemble}\n$d={d}$, $K={K}$\n$\\tau={tau:.2f}$ (spectral only)"
+    ax.text(
+        0.98,
+        0.02,
+        annotation_text,
+        transform=ax.transAxes,
+        fontsize=9,
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        ha="right",
+        va="bottom",
+    )
+
+    # Save figure
+    filename = f"unreachability_vs_rank_three_{ensemble}_d{d}_K{K}_tau{tau:.2f}.png"
+    filepath = os.path.join(outdir, filename)
+    plt.savefig(filepath, dpi=settings.DEFAULT_DPI, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"Saved three-criteria rank sweep: {filepath}")
+    return filepath
+
+
+def plot_unreachability_three_criteria_vs_K(
+    data: Dict[str, np.ndarray],
+    ensemble: str,
+    d: int,
+    tau: float,
+    outdir: str = ".",
+    floor: float = settings.DISPLAY_FLOOR,
+    trials: Optional[int] = None,
+) -> str:
+    """
+    Plot P(unreachability) vs K for 3 criteria (replica of single-d K-sweep).
+
+    Similar to plot_unreachability_three_criteria_vs_m, but:
+    - X-axis: K (number of Hamiltonians)
+    - Annotation includes Krylov m strategy from data['m_label']
+    - Filename: f"unreachability_vs_k_three_{ensemble}_d{d}_tau{tau:.2f}.png"
+
+    Args:
+        data: Output from monte_carlo_unreachability_vs_K_three
+        ensemble: "GOE" or "GUE"
+        d: Hilbert space dimension
+        tau: Threshold (for spectral only)
+        outdir: Output directory
+        floor: Display floor for log plot masking
+        trials: Total number of trials (nks × nst) for error bar computation
+
+    Returns:
+        Path to saved figure
+    """
+    ensure_dir(outdir)
+
+    fig, ax = plt.subplots(figsize=settings.DEFAULT_FIGSIZE)
+
+    k = data["k"]
+    m_label = data.get("m_label", "m = K")
+
+    # Define styling for each criterion
+    styles = {
+        "spectral": {"marker": "o", "color": "C0", "label": f"Spectral overlap (τ={tau:.2f})"},
+        "old": {"marker": "s", "color": "C1", "label": "Old criterion"},
+        "krylov": {"marker": "^", "color": "C2", "label": f"Krylov rank ({m_label})"},
+    }
+
+    # Plot each criterion if present
+    for criterion, style in styles.items():
+        p_key = f"p_{criterion}"
+        err_key = f"err_{criterion}"
+
+        if p_key in data and err_key in data:
+            p = data[p_key]
+
+            # Plot line with markers (no error bars yet)
+            ax.plot(
+                k,
+                p,
+                marker=style["marker"],
+                color=style["color"],
+                label=style["label"],
+                linestyle="--",
+                markersize=6,
+                linewidth=1.5,
+            )
+
+            # Add asymmetric Wilson error bars if trials is provided
+            if trials is not None and trials > 0:
+                err_lower, err_upper = _compute_asymmetric_errorbars(p, trials, floor=floor)
+                yerr = np.vstack([err_lower, err_upper])
+
+                # Only plot error bars where they are non-zero
+                has_errbar = (err_lower > 0) | (err_upper > 0)
+                if np.any(has_errbar):
+                    ax.errorbar(
+                        k[has_errbar],
+                        p[has_errbar],
+                        yerr=yerr[:, has_errbar],
+                        fmt="none",
+                        color=style["color"],
+                        capsize=3,
+                        linewidth=1,
+                        alpha=0.7,
+                    )
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Number of Hamiltonians $K$", fontsize=12)
+    ax.set_ylabel(r"$\log_{10} P(\mathrm{unreachable})$", fontsize=12)
+    ax.set_title(f"P(unreachability) vs $K$ | {ensemble}, $d={d}$", fontsize=13)
+    ax.legend(loc="best", fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    # Add annotation box with parameters
+    annotation_text = f"Ensemble: {ensemble}\n$d={d}$\n$\\tau={tau:.2f}$ (spectral only)\nKrylov: {m_label}"
+    ax.text(
+        0.98,
+        0.02,
+        annotation_text,
+        transform=ax.transAxes,
+        fontsize=9,
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        ha="right",
+        va="bottom",
+    )
+
+    # Save figure
+    filename = f"unreachability_vs_k_three_{ensemble}_d{d}_tau{tau:.2f}.png"
+    filepath = os.path.join(outdir, filename)
+    plt.savefig(filepath, dpi=settings.DEFAULT_DPI, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"Saved three-criteria K sweep: {filepath}")
+    return filepath
+
+
+def plot_unreachability_three_criteria_vs_density(
+    data: Dict[Any, Any],
+    ensemble: str,
+    outdir: str = ".",
+    floor: float = settings.DISPLAY_FLOOR,
+    trials: Optional[int] = None,
+    y_axis: str = "unreachable",
+) -> List[str]:
+    """
+    Plot P(unreachability) vs density ρ=K/d² for 3 criteria across multiple dimensions.
+
+    Publication-ready single-axes plot per τ: all criteria and all dimensions overlaid,
+    distinguished by line style (criteria) and color (dimensions).
+
+    Floor handling: Points at the display floor are shown as faded markers without
+    connecting line segments, preventing misleading vertical "cliff" drops.
+
+    Args:
+        data: Output from monte_carlo_unreachability_vs_density
+        ensemble: "GOE" or "GUE"
+        outdir: Output directory
+        floor: Display floor for log plot masking
+        trials: Total number of trials (for error bar computation)
+        y_axis: "unreachable" (default) or "reachable" (plots 1 - p_unreach)
+
+    Returns:
+        List of paths to saved figures (one per τ)
+
+    Styling:
+        - Single axes per τ
+        - Figure size: 14×10 inches, DPI 200
+        - X-axis: K/d² (normalized control density ρ)
+        - Y-axis: log₁₀ P (unreachable or reachable depending on y_axis)
+        - Criteria distinguished by line style/marker
+        - d values distinguished by color
+        - Legend: "Spectral (τ=0.95) • d=20", "Old • d=30", etc.
+        - Filename: three_criteria_vs_density_{ensemble}_tau{tau:.2f}_{y_axis}.png
+    """
+    ensure_dir(outdir)
+
+    dims = data["dims"]
+    taus = data["taus"]
+    saved_paths = []
+
+    # Define colors for each dimension (use distinct colors)
+    color_palette = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                     "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+    dim_colors = {d: color_palette[i % len(color_palette)] for i, d in enumerate(dims)}
+
+    # Define line styles and markers for each criterion
+    criterion_styles = {
+        "spectral": {"linestyle": "-", "marker": "o", "markersize": 6},
+        "old": {"linestyle": "--", "marker": "s", "markersize": 6},
+        "krylov": {"linestyle": ":", "marker": "^", "markersize": 6},
+    }
+    criterion_labels = {
+        "spectral": "Spectral",
+        "old": "Old",
+        "krylov": "Krylov (m=min(K,d))",
+    }
+
+    for tau in taus:
+        # Publication-ready figure size: 14×10 inches, DPI 200
+        fig, ax = plt.subplots(figsize=(14, 10), dpi=200)
+
+        criteria = ["spectral", "old", "krylov"]
+
+        # Plot all combinations of (criterion, d)
+        for criterion in criteria:
+            for d in dims:
+                key = (d, tau, criterion)
+                if key not in data:
+                    continue
+
+                result = data[key]
+                rho = result["rho"]
+                p = result["p"]
+
+                # Convert to reachable if requested
+                if y_axis == "reachable":
+                    p = 1.0 - p
+                    # Floor handling for reachable: p_reach near 1 → don't floor
+                    p = np.maximum(p, floor)
+
+                # Get color and style
+                color = dim_colors[d]
+                style = criterion_styles[criterion]
+
+                # Build legend label
+                if criterion == "spectral":
+                    label = f"{criterion_labels[criterion]} (τ={tau:.2f}) • d={d}"
+                else:
+                    label = f"{criterion_labels[criterion]} • d={d}"
+
+                # Detect floor-clipped points
+                is_floored = np.abs(p - floor) < floor * 0.01
+
+                # Plot non-floored points with connecting lines (using masked array)
+                p_masked = _create_floor_masked_array(p, floor)
+                ax.plot(
+                    rho,
+                    p_masked,
+                    marker=style["marker"],
+                    color=color,
+                    label=label,
+                    linestyle=style["linestyle"],
+                    markersize=style["markersize"],
+                    linewidth=2.0,
+                    alpha=0.9,
+                    markeredgewidth=0.5,
+                    markeredgecolor='white',
+                )
+
+                # Plot floored points separately as faded markers (no connecting lines)
+                if np.any(is_floored):
+                    ax.plot(
+                        rho[is_floored],
+                        p[is_floored],
+                        marker=style["marker"],
+                        color=color,
+                        linestyle='none',
+                        markersize=style["markersize"],
+                        alpha=0.3,  # Faded
+                        markeredgewidth=0,
+                    )
+
+                # Add asymmetric Wilson error bars if trials is provided
+                if trials is not None and trials > 0:
+                    p_orig = result["p"]  # Always use unreachable for error bars
+                    err_lower, err_upper = _compute_asymmetric_errorbars(
+                        p_orig, trials, floor=floor
+                    )
+
+                    # If y_axis is reachable, transform error bars
+                    if y_axis == "reachable":
+                        # For p_reach = 1 - p_unreach, errors flip
+                        err_lower, err_upper = err_upper, err_lower
+
+                    yerr = np.vstack([err_lower, err_upper])
+
+                    # Only plot error bars where they are non-zero
+                    has_errbar = (err_lower > 0) | (err_upper > 0)
+                    if np.any(has_errbar):
+                        ax.errorbar(
+                            rho[has_errbar],
+                            p[has_errbar],
+                            yerr=yerr[:, has_errbar],
+                            fmt="none",
+                            color=color,
+                            capsize=2,
+                            linewidth=1,
+                            alpha=0.5,
+                        )
+
+        ax.set_yscale("log")
+        ax.set_xlabel(r"$K/d^2$", fontsize=16, fontweight='bold')
+
+        if y_axis == "reachable":
+            ax.set_ylabel(r"$\log_{10} P(\mathrm{reachable})$", fontsize=16, fontweight='bold')
+            title_y = "P(reachable)"
+        else:
+            ax.set_ylabel(r"$\log_{10} P(\mathrm{unreachable})$", fontsize=16, fontweight='bold')
+            title_y = "P(unreachable)"
+
+        ax.set_title(
+            f"{title_y} vs density $K/d^2$ | {ensemble}, $\\tau={tau:.2f}$",
+            fontsize=18,
+            fontweight='bold',
+            pad=20,
+        )
+        ax.legend(loc="best", fontsize=11, ncol=2, framealpha=0.95,
+                  edgecolor='gray', fancybox=True)
+        ax.grid(True, alpha=0.25, linewidth=0.5, zorder=0)
+        ax.tick_params(axis='both', which='major', labelsize=13)
+
+        # Add floor annotation if any points are floored
+        floor_hit = False
+        for criterion in criteria:
+            for d in dims:
+                key = (d, tau, criterion)
+                if key in data:
+                    p_check = data[key]["p"]
+                    if np.any(np.abs(p_check - floor) < floor * 0.01):
+                        floor_hit = True
+                        break
+            if floor_hit:
+                break
+
+        if floor_hit:
+            ax.text(0.02, 0.02, f"Display floor: {floor:.0e}",
+                   transform=ax.transAxes, fontsize=10, style='italic',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+        # Save figure with higher DPI
+        filename = f"three_criteria_vs_density_{ensemble}_tau{tau:.2f}_{y_axis}.png"
+        filepath = os.path.join(outdir, filename)
+        plt.savefig(filepath, dpi=200, bbox_inches="tight")
+        plt.close()
+
+        logger.info(f"Saved density plot for τ={tau:.2f}: {filepath}")
+        saved_paths.append(filepath)
+
+    return saved_paths
+
+
+def plot_unreachability_K_multi_tau(
+    data: Dict[Any, Any],
+    ensemble: str,
+    outdir: str = ".",
+    floor: float = settings.DISPLAY_FLOOR,
+    trials: Optional[int] = None,
+    y_type: str = "unreachable",
+) -> str:
+    """
+    Plot P(unreachability) vs K with multiple τ for spectral (gradient) + old + krylov.
+
+    Single-axes plot showing 5 curves:
+    - Spectral at 3 τ values (light→dark gradient of same base color)
+    - Old criterion
+    - Krylov criterion
+
+    Floor-aware plotting:
+    - Points at display floor are NOT connected by lines (prevents vertical "cliffs")
+    - Floored points shown as faded markers (alpha=0.3)
+    - Line segments are broken at floor using masked arrays
+
+    Args:
+        data: Output from monte_carlo_unreachability_vs_K_multi_tau
+        ensemble: "GOE" or "GUE"
+        outdir: Output directory
+        floor: Display floor for log plot masking
+        trials: Total number of trials (for error bar computation)
+        y_type: "unreachable" or "reachable" (plots P(unreachable) or P(reachable))
+
+    Returns:
+        Path to saved figure
+
+    Styling:
+        - Single axes, publication-ready (14×10 inches, DPI 200)
+        - X-axis: K (number of Hamiltonians)
+        - Y-axis: log₁₀ P(unreachable) or log₁₀ P(reachable)
+        - Spectral: gradient from light to dark for increasing τ
+        - Old: dashed line, distinct color
+        - Krylov: dotted line, distinct color
+    """
+    ensure_dir(outdir)
+
+    k = data["k"]
+    taus = data["taus"]
+    d = data["d"]
+
+    fig, ax = plt.subplots(figsize=(14, 10), dpi=200)
+
+    # Define base color for spectral (use blue gradient)
+    spectral_base = np.array([0.2, 0.4, 0.8])  # Blue RGB
+    # Create gradient: light to dark for increasing tau
+    spectral_colors = [spectral_base * (0.4 + 0.6 * (i / (len(taus) - 1))) for i in range(len(taus))]
+
+    # Plot spectral for each tau with gradient (floor-aware)
+    for i, tau in enumerate(taus):
+        key = (tau, "spectral")
+        result = data[key]
+        p_unreach = result["p"]
+
+        # Transform for reachable if needed
+        if y_type == "reachable":
+            p = 1.0 - p_unreach
+            # Clip to floor for numerical stability
+            p = np.maximum(p, floor)
+        else:
+            p = p_unreach
+
+        color = spectral_colors[i]
+
+        label = f"Spectral (τ={tau:.2f})"
+
+        # Detect floor-clipped points
+        is_floored = np.abs(p - floor) < floor * 0.01
+
+        # Plot non-floored points with masked array (breaks line segments at floor)
+        p_masked = _create_floor_masked_array(p, floor)
+        ax.plot(
+            k,
+            p_masked,
+            marker="o",
+            color=color,
+            label=label,
+            linestyle="-",
+            markersize=6,
+            linewidth=2.0,
+            alpha=0.9,
+        )
+
+        # Plot floored points as faded markers (no connecting lines)
+        if np.any(is_floored):
+            ax.plot(
+                k[is_floored],
+                p[is_floored],
+                marker="o",
+                color=color,
+                linestyle="none",
+                markersize=6,
+                alpha=0.3,
+            )
+
+        # Add error bars (only for non-floored points)
+        if trials is not None and trials > 0:
+            err_lower, err_upper = _compute_asymmetric_errorbars(p, trials, floor=floor)
+            yerr = np.vstack([err_lower, err_upper])
+
+            has_errbar = (err_lower > 0) | (err_upper > 0) & ~is_floored
+            if np.any(has_errbar):
+                ax.errorbar(
+                    k[has_errbar],
+                    p[has_errbar],
+                    yerr=yerr[:, has_errbar],
+                    fmt="none",
+                    color=color,
+                    capsize=3,
+                    linewidth=1.2,
+                    alpha=0.6,
+                )
+
+    # Plot old criterion (floor-aware)
+    p_old_unreach = data["old"]["p"]
+
+    # Transform for reachable if needed
+    if y_type == "reachable":
+        p_old = 1.0 - p_old_unreach
+        p_old = np.maximum(p_old, floor)
+    else:
+        p_old = p_old_unreach
+
+    is_floored_old = np.abs(p_old - floor) < floor * 0.01
+
+    # Plot non-floored with masked array
+    p_old_masked = _create_floor_masked_array(p_old, floor)
+    ax.plot(
+        k,
+        p_old_masked,
+        marker="s",
+        color="C1",
+        label="Old criterion",
+        linestyle="--",
+        markersize=6,
+        linewidth=2.0,
+        alpha=0.9,
+    )
+
+    # Plot floored points as faded markers
+    if np.any(is_floored_old):
+        ax.plot(
+            k[is_floored_old],
+            p_old[is_floored_old],
+            marker="s",
+            color="C1",
+            linestyle="none",
+            markersize=6,
+            alpha=0.3,
+        )
+
+    if trials is not None and trials > 0:
+        err_lower, err_upper = _compute_asymmetric_errorbars(p_old, trials, floor=floor)
+        yerr = np.vstack([err_lower, err_upper])
+        has_errbar = (err_lower > 0) | (err_upper > 0) & ~is_floored_old
+        if np.any(has_errbar):
+            ax.errorbar(
+                k[has_errbar],
+                p_old[has_errbar],
+                yerr=yerr[:, has_errbar],
+                fmt="none",
+                color="C1",
+                capsize=3,
+                linewidth=1.2,
+                alpha=0.6,
+            )
+
+    # Plot krylov criterion (floor-aware)
+    p_krylov_unreach = data["krylov"]["p"]
+
+    # Transform for reachable if needed
+    if y_type == "reachable":
+        p_krylov = 1.0 - p_krylov_unreach
+        p_krylov = np.maximum(p_krylov, floor)
+    else:
+        p_krylov = p_krylov_unreach
+
+    is_floored_krylov = np.abs(p_krylov - floor) < floor * 0.01
+
+    # Plot non-floored with masked array
+    p_krylov_masked = _create_floor_masked_array(p_krylov, floor)
+    ax.plot(
+        k,
+        p_krylov_masked,
+        marker="^",
+        color="C2",
+        label="Krylov (m=min(K,d))",
+        linestyle=":",
+        markersize=6,
+        linewidth=2.0,
+        alpha=0.9,
+    )
+
+    # Plot floored points as faded markers
+    if np.any(is_floored_krylov):
+        ax.plot(
+            k[is_floored_krylov],
+            p_krylov[is_floored_krylov],
+            marker="^",
+            color="C2",
+            linestyle="none",
+            markersize=6,
+            alpha=0.3,
+        )
+
+    if trials is not None and trials > 0:
+        err_lower, err_upper = _compute_asymmetric_errorbars(p_krylov, trials, floor=floor)
+        yerr = np.vstack([err_lower, err_upper])
+        has_errbar = (err_lower > 0) | (err_upper > 0) & ~is_floored_krylov
+        if np.any(has_errbar):
+            ax.errorbar(
+                k[has_errbar],
+                p_krylov[has_errbar],
+                yerr=yerr[:, has_errbar],
+                fmt="none",
+                color="C2",
+                capsize=3,
+                linewidth=1.2,
+                alpha=0.6,
+            )
+
+    # Enhanced axis formatting
+    ax.set_yscale("log")
+    ax.set_xlabel("Number of Hamiltonians $K$", fontsize=16, fontweight='bold')
+
+    # Set labels based on y_type
+    if y_type == "reachable":
+        ax.set_ylabel(r"$\log_{10} P(\mathrm{reachable})$", fontsize=16, fontweight='bold')
+        ax.set_title(
+            f"P(reachable) vs $K$ | {ensemble}, $d={d}$",
+            fontsize=18,
+            fontweight='bold',
+        )
+    else:
+        ax.set_ylabel(r"$\log_{10} P(\mathrm{unreachable})$", fontsize=16, fontweight='bold')
+        ax.set_title(
+            f"P(unreachable) vs $K$ | {ensemble}, $d={d}$",
+            fontsize=18,
+            fontweight='bold',
+        )
+    ax.legend(loc="best", fontsize=12, frameon=True, framealpha=0.9)
+    ax.grid(True, alpha=0.25, which='both')
+    ax.tick_params(labelsize=14)
+
+    # Add floor annotation if any curve hits the floor
+    # Check if any points across all curves hit the floor
+    any_floored = is_floored_old.any() or is_floored_krylov.any()
+    # Also check spectral curves
+    for i, tau in enumerate(taus):
+        key = (tau, "spectral")
+        p = data[key]["p"]
+        if np.any(np.abs(p - floor) < floor * 0.01):
+            any_floored = True
+            break
+
+    if any_floored:
+        ax.text(
+            0.02, 0.02,
+            f"Display floor: {floor:.0e}\n(faded markers show floored values)",
+            transform=ax.transAxes,
+            fontsize=10,
+            verticalalignment='bottom',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3)
+        )
+
+    # Save figure at higher DPI
+    tau_str = "_".join([f"{t:.2f}" for t in taus])
+    filename = f"K_sweep_multi_tau_{ensemble}_d{d}_taus{tau_str}_{y_type}.png"
+    filepath = os.path.join(outdir, filename)
+    plt.savefig(filepath, dpi=200, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"Saved K-sweep multi-tau plot ({y_type}): {filepath}")
     return filepath

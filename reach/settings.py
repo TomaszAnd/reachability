@@ -163,3 +163,19 @@ ITER_SWEEP_ITERS: List[int] = [10, 20, 50]
 
 #: Summary output directory for all figures
 FIG_SUMMARY_DIR: str = "fig_summary"
+
+# ============================================================================
+# KRYLOV CRITERION SETTINGS
+# ============================================================================
+
+#: Breakdown tolerance for Arnoldi iteration (detect rank saturation)
+KRYLOV_BREAKDOWN_TOL: float = 1e-14
+
+#: Rank tolerance for matrix rank comparisons in Krylov criterion
+KRYLOV_RANK_TOL: float = 1e-8
+
+#: Default Krylov rank values for m-sweep experiments (None = use range(1, d+1))
+DEFAULT_KRYLOV_M_VALUES: List[int] | None = None
+
+#: Default Krylov m strategy when sweeping K ("K" means m=K dynamically)
+DEFAULT_KRYLOV_M_STRATEGY: str = "K"
