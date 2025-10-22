@@ -1187,13 +1187,15 @@ def cmd_three_criteria_vs_density(args) -> None:
     dims = parse_comma_separated(args.dims, int)
     taus = parse_comma_separated(args.taus, float)
 
-    # HARD ASSERTION: Density sweeps must use exactly {20, 30, 40, 50}
-    REQUIRED_DIMS = {20, 30, 40, 50}
-    if set(dims) != REQUIRED_DIMS:
-        raise ValueError(
-            f"Density sweep requires EXACTLY dims={sorted(REQUIRED_DIMS)}, "
-            f"got dims={sorted(set(dims))}. This ensures publication-ready comparisons."
-        )
+    # HARD ASSERTION: Density sweeps must use exact dims for GOE/GUE (publication standard)
+    # For GEO2, allow flexible power-of-2 dimensions
+    if args.ensemble in ["GOE", "GUE"]:
+        REQUIRED_DIMS = {20, 30, 40, 50}
+        if set(dims) != REQUIRED_DIMS:
+            raise ValueError(
+                f"Density sweep for {args.ensemble} requires EXACTLY dims={sorted(REQUIRED_DIMS)}, "
+                f"got dims={sorted(set(dims))}. This ensures publication-ready comparisons."
+            )
 
     # Validate and extract ensemble parameters (for GEO2)
     ensemble_params = validate_geo2_params(args)
