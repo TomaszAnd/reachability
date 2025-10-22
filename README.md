@@ -66,9 +66,8 @@ python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
 # GEO2 requires power-of-2 dimensions: d = 2^(nx×ny)
 # Use --nx, --ny to specify lattice shape
 # Optional: --periodic for periodic boundary conditions
-# Note: Some figure filenames use historical labels (e.g., "d20")
-#       while GEO2 runs use actual qubit dimensions (d=16, 32, etc.)
-#       CSVs record the true dimensions used.
+# GEO2 filenames reflect true dimensions (e.g., d512 for 3×3 lattice)
+# For denser K/d² sampling, use 3×3 or larger lattices
 ```
 
 ### Plot from Existing CSV (No Recomputation)

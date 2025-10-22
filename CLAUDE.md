@@ -117,7 +117,8 @@ python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
 
 # GEO2 ensemble definition: https://arxiv.org/html/2510.06321v1
 # Note: GEO2 uses qubit lattices with d=2^n (power-of-2 dimensions only)
-#       Some historical figure names use "d20" labels, but CSVs record actual d
+#       Filenames reflect true dimensions (e.g., d512 for 3×3 lattice)
+#       For density sweeps, use 3×3 or larger to get meaningful K/d² sampling
 ```
 
 ### Refreshing Plots from CSV (Streaming Mode)

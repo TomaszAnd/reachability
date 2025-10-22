@@ -56,7 +56,7 @@ def _load_and_filter_csv(
 
     Args:
         csv_path: Path to CSV file
-        ensemble: Filter by ensemble ("GOE" or "GUE")
+        ensemble: Filter by ensemble ("GOE", "GUE", or "GEO2")
         taus: Optional list of tau values to filter (default: all)
 
     Returns:
@@ -64,7 +64,7 @@ def _load_and_filter_csv(
 
     Raises:
         FileNotFoundError: If CSV doesn't exist
-        ValueError: If CSV is empty or missing required columns
+        ValueError: If CSV is empty, missing required columns, or contains mixed ensembles
     """
     if not Path(csv_path).exists():
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
@@ -74,12 +74,32 @@ def _load_and_filter_csv(
     if df.empty:
         raise ValueError(f"CSV file is empty: {csv_path}")
 
+    # Check for mixed ensembles before filtering
+    unique_ensembles = df["ensemble"].unique()
+    if len(unique_ensembles) > 1:
+        raise ValueError(
+            f"CSV contains mixed ensembles: {list(unique_ensembles)}. "
+            f"Please use separate CSVs for each ensemble or filter manually. "
+            f"Requested ensemble: {ensemble}"
+        )
+
     # Filter by ensemble
     df = df[df["ensemble"] == ensemble].copy()
 
     if df.empty:
-        logger.warning(f"No data found for ensemble={ensemble}")
-        return df
+        raise ValueError(
+            f"No data found for ensemble={ensemble} in {csv_path}. "
+            f"Available ensemble: {unique_ensembles[0] if len(unique_ensembles) > 0 else 'none'}. "
+            f"Ensure --ensemble matches the CSV data."
+        )
+
+    # Check for mixed dimensions (warn for GEO2)
+    unique_dims = df["d"].unique()
+    if ensemble == "GEO2" and len(unique_dims) > 1:
+        logger.warning(
+            f"CSV contains multiple dimensions for GEO2: {sorted(unique_dims)}. "
+            f"Ensure consistent lattice parameters (--nx, --ny) for proper plotting."
+        )
 
     # Filter by tau if specified
     if taus is not None:
@@ -87,7 +107,7 @@ def _load_and_filter_csv(
         mask = df["tau"].isin(taus) | (df["tau"] == "") | df["tau"].isna()
         df = df[mask].copy()
 
-    logger.info(f"Loaded {len(df)} rows from {csv_path}")
+    logger.info(f"Loaded {len(df)} rows from {csv_path} (ensemble={ensemble})")
     return df
 
 
