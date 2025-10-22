@@ -5,559 +5,451 @@
 
 ## Overview
 
-**reach** is a Python package for analyzing quantum state reachability using time-free spectral overlap criterion. Instead of asking whether one can reach a target state at a specific time, the analysis determines whether a target state lies within the reachable subspace spanned by a parameterized Hamiltonian family.
+**reach** is a Python package for analyzing quantum state reachability using time-free criteria. Instead of explicit time evolution, we determine whether a target state lies within the reachable subspace of a parameterized Hamiltonian family `H(λ) = Σᵢ λᵢ Hᵢ`.
+
+### What It Does
+
+- **Compares 3 reachability criteria**: Spectral overlap (τ-based), old criterion (moment-based), and Krylov subspace
+- **Runs density sweeps**: Analyze P(unreachability) vs control density ρ = K/d² across dimensions {20, 30, 40, 50}
+- **Runs K-sweeps**: Analyze P(unreachability) vs number of Hamiltonians K at fixed dimension
+- **Generates publication-ready plots**: Floor-aware rendering, Wilson error bars, 14×10" @ 200 DPI
+- **Streams results**: Incremental CSV logging with `--flush-every` for resumable runs
+- **Plots from CSV**: `plot-from-csv` command for mid-run progress visualization
 
 ### Key Features
 
 - **Time-free analysis**: No explicit time evolution required
-- **Random matrix ensembles**: Support for GOE (Gaussian Orthogonal Ensemble) and GUE (Gaussian Unitary Ensemble)
+- **Random matrix ensembles**: GOE and GUE support
 - **Monte Carlo estimation**: Robust probability estimates with error bars
-- **Multiple optimizers**: Six optimization methods for maximizing spectral overlap
-- **Publication-quality visualization**: Automated figure generation with exact naming conventions
+- **Streaming mode**: CSV written incrementally, enables resumable runs and partial plotting
+- **Floor-aware plotting**: No vertical "cliffs" at display floor (1e-12)
+- **Dual y-axis**: Both P(unreachable) and P(reachable) versions
 - **Full reproducibility**: Deterministic seeding and centralized configuration
-- **Fast/full modes**: Quick validation (~30 min) or production runs (~2 hours)
+
+---
+
+## Quick Start (5 minutes)
+
+### Installation
+
+```bash
+# Clone and install
+git clone https://github.com/yourusername/reachability.git
+cd reachability
+pip install -e .
+
+# Verify installation
+python -m reach.cli --help
+```
+
+### Generate a Single Figure (Fast)
+
+```bash
+# Quick density plot (takes ~2 minutes)
+python -m reach.cli three-criteria-vs-density \
+  --ensemble GUE --dims 20,30,40,50 \
+  --rho-max 0.05 --rho-step 0.01 \
+  --taus 0.95 --trials 25 \
+  --y unreachable
+
+# Output: fig_summary/three_criteria_vs_density_GUE_tau0.95_unreachable.png
+```
+
+### Plot from Existing CSV (No Recomputation)
+
+If you have CSV data from a previous run:
+
+```bash
+# Generate plots from CSV (instant)
+python -m reach.cli plot-from-csv \
+  --csv fig_summary/density_gue.csv \
+  --type density \
+  --ensemble GUE \
+  --y unreachable
+```
+
+---
+
+## Production Runs
+
+For full publication-quality sweeps, see detailed guides:
+
+- **[README_PRODUCTION.md](README_PRODUCTION.md)** - Quick start for production runs
+- **[PRODUCTION_RUN_GUIDE.md](PRODUCTION_RUN_GUIDE.md)** - Runtime estimates, parameters, monitoring
+- **[PRODUCTION_RUN_SUMMARY.md](PRODUCTION_RUN_SUMMARY.md)** - Expected outputs, validation steps
+
+### Fast Demo (~5-10 minutes)
+
+```bash
+./run_production_sweeps_FAST.sh
+```
+
+Generates 8 plots + 2 CSVs with reduced parameters.
+
+### Full Production (~2-3 hours)
+
+```bash
+# Background run with logging
+nohup ./run_production_sweeps.sh > production.log 2>&1 &
+echo $! > production.pid
+
+# Monitor progress (in another terminal)
+tail -f production.log
+
+# Refresh plots from growing CSV
+./scripts/plot_refresh.sh
+```
+
+Generates publication-ready plots with `trials=150` (density) and `trials=300` (K-sweep).
+
+---
+
+## Plotting Pipeline (TL;DR)
+
+### Streaming CSV Mode
+
+Use `--flush-every N` to write CSV incrementally:
+
+```bash
+python -m reach.cli three-criteria-vs-density \
+  --ensemble GUE --dims 20,30,40,50 \
+  --rho-max 0.15 --rho-step 0.01 \
+  --taus 0.90,0.95,0.99 --trials 150 \
+  --csv fig_summary/density_gue.csv \
+  --flush-every 10  \  # <-- Flush every 10 data points
+  --y unreachable
+```
+
+**Benefits**:
+- CSV grows during computation (survives interrupts)
+- Resume from partial data
+- Plot mid-run progress with `plot-from-csv`
+
+### Plot from CSV
+
+Read existing CSV and generate plots (useful for partial results):
+
+```bash
+# Density plots
+python -m reach.cli plot-from-csv \
+  --csv fig_summary/density_gue.csv \
+  --type density \
+  --ensemble GUE \
+  --y unreachable
+
+# K-sweep plots
+python -m reach.cli plot-from-csv \
+  --csv fig_summary/k30_gue.csv \
+  --type k-multi-tau \
+  --ensemble GUE \
+  --y unreachable
+```
+
+**Handles gracefully**:
+- Partial CSVs (missing data points)
+- Mixed dimensions (filters/warns)
+- Empty files (clear errors)
+
+### CSV Schema (15 fields)
+
+```
+run_id, timestamp, ensemble, criterion, tau, d, K, m,
+rho_K_over_d2, trials, successes_unreach, p_unreach,
+log10_p_unreach, mean_best_overlap, sem_best_overlap
+```
+
+### Display Floor & Styling
+
+- **Floor**: `1e-12` for log₁₀ plots (prevents -∞)
+- **Floor-aware rendering**: Broken lines at floor, faded markers
+- **Wilson intervals**: Asymmetric error bars for binomial data
+- **Styling**: 14×10 inches, 200 DPI, bold 16pt axis labels, 18pt title
 
 ---
 
 ## Mathematical Foundation
 
-### Core Equations
+### Core Concept
 
-Given:
-- An initial state **|ψ⟩**  (typically |0⟩)
-- A target state **|φ⟩**  (random or specified)
-- A parameterized Hamiltonian **H(λ) = Σᵢ₌₁ᴷ λᵢ Hᵢ** where **λ ∈ [-1,1]ᴷ**
+Given initial state |ψ⟩, target state |φ⟩, and Hamiltonian family H(λ) = Σᵢ λᵢ Hᵢ:
 
-#### 1. Hermitian Eigendecomposition
-
-For any parameter vector λ, we diagonalize the Hamiltonian using `scipy.linalg.eigh`:
-
+**Spectral overlap**:
 ```
-H(λ) = U(λ) diag(E₁, E₂, ..., Eₐ) U†(λ)
+S(λ) = Σₙ |⟨n(λ)|φ⟩* ⟨n(λ)|ψ⟩| ∈ [0,1]
 ```
 
-where:
-- **E₁, ..., Eₐ** are real eigenvalues (energies)
-- **U(λ)** is the unitary matrix of eigenvectors
-- **eigh** is used instead of **eig** for numerical stability (Hermitian-specific algorithm)
+where |n(λ)⟩ are eigenstates of H(λ).
 
-#### 2. State Projections onto Eigenbasis
-
-We project both initial and target states onto the instantaneous eigenbasis:
-
+**Unreachability criterion** (spectral, τ-based):
 ```
-ψₙ(λ) = ⟨n(λ)|ψ⟩   (initial state projection)
-φₙ(λ) = ⟨n(λ)|φ⟩   (target state projection)
+max_{λ∈[-1,1]ᴷ} S(λ) < τ  →  unreachable
 ```
 
-where **|n(λ)⟩** is the nth eigenstate of H(λ).
+We estimate `P(unreachability)` via Monte Carlo over random ensembles.
 
-#### 3. Spectral Overlap (Time-Free Criterion)
+### Three Criteria Compared
 
-The spectral overlap function measures alignment in the eigenbasis:
+1. **Spectral** (NEW): τ-based threshold on maximum overlap
+2. **Old** (τ-free): Moment-based definiteness check (classical)
+3. **Krylov**: Projection-residual test on Krylov subspace
 
-```
-S(λ) = Σₙ₌₁ᵈ |φₙ*(λ) ψₙ(λ)| ∈ [0,1]
-```
-
-**Interpretation**:
-- **S = 1**: Perfect alignment → target is maximally reachable
-- **S = 0**: No alignment → target is unreachable
-- Higher overlap → easier to reach target under time evolution
-
-#### 4. Unreachability Criterion (New, τ-based)
-
-A target state is classified as **unreachable** if:
-
-```
-max_{λ∈[-1,1]ᴷ} S(λ) < τ
-```
-
-where τ is a threshold (typically τ = 0.95).
-
-We estimate the probability:
-
-```
-P_unreach(d, K; τ) = Pr[max_λ S(λ) < τ]
-```
-
-via Monte Carlo sampling over random Hamiltonian ensembles and target states.
-
-#### 5. Old Criterion (Moment-Based, τ-free)
-
-For comparison, we also implement the classical moment-based criterion that uses
-definiteness checks on second moment matrices. This criterion does **NOT** use a
-threshold τ and is included for validation purposes.
-
-#### 6. Binomial Standard Error
-
-Error bars on probability estimates use binomial SEM:
-
-```
-SEM(p) = √(p(1-p)/N)
-```
-
-where N is the number of Monte Carlo samples.
+For full mathematical details, see:
+- [KRYLOV_README.md](KRYLOV_README.md) - Krylov criterion, projection-residual test
+- [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) - Floor-aware plotting details
 
 ---
 
-## Repository Structure
+## File Map
 
+### Core Package (`reach/`)
+
+| File | Purpose |
+|------|---------|
+| `cli.py` | Command-line interface, subcommands, argument parsing |
+| `analysis.py` | Monte Carlo loops, density/K sweeps (pure computation) |
+| `viz.py` | Plot functions for computed data (pure rendering) |
+| `viz_csv.py` | Plot functions for CSV data (streaming/partial results) |
+| `logging_utils.py` | CSV logging, `StreamingCSVWriter` class |
+| `models.py` | GOE/GUE ensemble generation, random states |
+| `mathematics.py` | Eigendecomposition, spectral overlap, Krylov tests |
+| `optimize.py` | Maximize S(λ) using scipy.optimize |
+| `settings.py` | All config constants, defaults, hyperparameters |
+
+### Scripts & Helpers
+
+| File | Purpose |
+|------|---------|
+| `run_production_sweeps.sh` | Full production run (2-3 hrs, trials=150/300) |
+| `run_production_sweeps_FAST.sh` | Fast demo (5-10 min, reduced params) |
+| `scripts/plot_refresh.sh` | Re-render plots from existing CSVs |
+| `validate_implementation.py` | Validation tests for production requirements |
+| `validate_streaming_mode.py` | Validation tests for plot-from-csv |
+
+### Output (`fig_summary/`)
+
+**Density plots** (6 files):
 ```
-reachability/
-├── reach/                      # Core Python package
-│   ├── __init__.py            # Package exports (version 0.1.0)
-│   ├── settings.py            # SINGLE SOURCE OF TRUTH: all config, constants, defaults
-│   ├── models.py              # GOE/GUE ensemble generation, random states, seeding
-│   ├── mathematics.py         # Eigendecomposition, spectral overlap, SEM calculation
-│   ├── optimize.py            # Maximize S(λ) using scipy.optimize (6 methods)
-│   ├── analysis.py            # Pure compute: Monte Carlo, landscapes, τ sweeps (NO plotting)
-│   ├── viz.py                 # Pure rendering: all plot functions (NO computation)
-│   └── cli.py                 # Command-line interface with subcommands
-├── scripts/                    # Helper scripts for batch figure generation
-│   ├── generate_summary_figs.py   # Generate all figures (6 types × 2 ensembles)
-│   └── generate_overlap_hists.py  # Generate overlap histograms only
-├── tests/                      # Smoke tests (fast, <10s runtime)
-│   ├── __init__.py
-│   └── test_smoke.py          # Basic functionality tests (import, shapes, bounds)
-├── fig_summary/                # Output directory for publication figures
-│   ├── unreachability_vs_rank_old_vs_new_{GOE,GUE}_tau{0.90,0.95,0.99}.png  (6 files)
-│   ├── tau_hist_{GOE,GUE}.png                                                (2 files)
-│   ├── optimizer_overlap_hist_{GOE,GUE}.png                                  (2 files)
-│   ├── iter_sweep_prob_{GOE,GUE}.png                                         (2 files)
-│   ├── landscape_S2D_{GOE,GUE}_d10_k3.png                                    (2 files)
-│   ├── landscape_S3D_{GOE,GUE}_d10_k3.png                                    (2 files)
-│   └── overlap_hist_pdf_{GOE,GUE}.png                                        (2 files)
-├── README.md                   # This file
-├── LICENSE                     # MIT License
-├── CITATION.cff                # Citation metadata
-├── CHANGELOG.md                # Version history
-├── pyproject.toml              # Project metadata, dependencies, tool configs
-├── .pre-commit-config.yaml     # Pre-commit hooks (black, isort, ruff)
-└── .github/workflows/lint.yml  # CI/CD: automated linting and testing
+three_criteria_vs_density_GUE_tau{0.90,0.95,0.99}_{unreachable,reachable}.png
 ```
 
-### Module Interaction Flow
+**K-sweep plots** (2 files):
+```
+K_sweep_multi_tau_GUE_d30_taus0.90_0.95_0.99_{unreachable,reachable}.png
+```
+
+**CSV data** (2 files):
+```
+density_gue.csv      # Density sweep data (all dims, all τ)
+k30_gue.csv          # K-sweep data (d=30, multiple τ)
+```
+
+---
+
+## Module Interaction Flow
 
 ```
-User
-  ↓
-cli.py (parse args, orchestrate)
-  ↓
+User → cli.py (parse args)
+       ↓
 models.py (generate Hamiltonians & states)
-  ↓
-analysis.py (Monte Carlo loops, call optimize)
-  ↓
+       ↓
+analysis.py (Monte Carlo loops)
+       ↓
 optimize.py (maximize S(λ))
-  ↓
-mathematics.py (compute S(λ), eigendecompose)
-  ↓
+       ↓
+mathematics.py (compute S(λ))
+       ↓
 analysis.py (collect results)
-  ↓
-viz.py (render figures)
-  ↓
-fig_summary/*.png
+       ↓
+viz.py / viz_csv.py (render figures)
+       ↓
+fig_summary/*.png + *.csv
 ```
 
 ---
 
-## Figure Glossary
+## CLI Examples
 
-All figures annotate key parameters (d, K, τ, grid size, sampling) for traceability.
+### Density Sweep
 
-| Filename Pattern | Description | Key Hyperparameters | Script/Command |
-|------------------|-------------|---------------------|----------------|
-| `unreachability_vs_rank_old_vs_new_{ensemble}_tau{τ}.png` | Compare old (τ-free) vs new (τ-based) criterion | dims=[6,8,10,...,30], k=[2,3,4,5,6,7], τ∈{0.90,0.95,0.99}, nks=30, nst=15 | `scripts/generate_summary_figs.py` |
-| `tau_hist_{ensemble}.png` | Threshold sensitivity: P(unreachability) vs τ | dims=[12,16,20,24,30], k=4, τ∈[0.90,0.92,0.95,0.97,0.99], nks=60, nst=15 | `scripts/generate_summary_figs.py` |
-| `optimizer_overlap_hist_{ensemble}.png` | Mean±SEM of S* across optimizers | dims=[12,16,20,24,30], k=4, methods=[L-BFGS-B,CG,Powell], nks=60, nst=15 | `scripts/generate_summary_figs.py` |
-| `iter_sweep_prob_{ensemble}.png` | Convergence: P(unreach) & runtime vs iterations | dims=[12,16,20,24,30], k=4, iters=[10,20,50], τ=0.95, nks=60, nst=15 | `scripts/generate_summary_figs.py` |
-| `landscape_S2D_{ensemble}_d{d}_k{k}.png` | 2D heatmap of S(λ₁,λ₂) | d=10, k=3, grid=41, n_targets=30 | `scripts/generate_summary_figs.py` |
-| `landscape_S3D_{ensemble}_d{d}_k{k}.png` | 3D surface of S(λ₁,λ₂) | d=10, k=3, grid=41, n_targets=30 | `scripts/generate_summary_figs.py` |
-| `overlap_hist_pdf_{ensemble}.png` | Histogram of S* distributions | dims=[12,16,20,24,30], k=4, bins=0.90-1.00 (step 0.01) | `scripts/generate_overlap_hists.py` |
+```bash
+# Full parameter space
+python -m reach.cli three-criteria-vs-density \
+  --ensemble GUE \
+  --dims 20,30,40,50 \
+  --rho-max 0.15 \
+  --rho-step 0.01 \
+  --taus 0.90,0.95,0.99 \
+  --trials 150 \
+  --csv fig_summary/density_gue.csv \
+  --flush-every 10 \
+  --y unreachable
+```
 
-### Interpretation Guide
+**Output**: 3 PNG files (one per τ) + appends to CSV
 
-- **Rank comparison**: Shows how unreachability changes with Hamiltonian count K. Old criterion is τ-free (definiteness check), new uses threshold. Annotation: "old: τ-free; new: τ={τ:.2f}".
-- **Tau histograms**: Steep drop in P(unreachability) → sensitive to τ choice. Flat curves → robust to threshold.
-- **Optimizer comparison**: Higher mean S* → better optimizer. Error bars show statistical uncertainty.
-- **Iteration sweep**: Left panel shows convergence of P(unreachability), right panel shows runtime cost. Choose iteration count from plateau.
-- **Landscapes**: Bright regions = high S(λ) → easier to reach. Dark regions = low overlap → harder to reach. Peaks indicate optimal parameters λ*.
+### K-Sweep (Multi-Tau)
+
+```bash
+# Fixed dimension, sweep K
+python -m reach.cli three-criteria-vs-K-multi-tau \
+  --ensemble GUE \
+  -d 30 \
+  --k-max 14 \
+  --taus 0.90,0.95,0.99 \
+  --trials 300 \
+  --csv fig_summary/k30_gue.csv \
+  --flush-every 10 \
+  --y unreachable
+```
+
+**Output**: 1 PNG file (all τ overlaid) + appends to CSV
+
+### Plot from CSV
+
+```bash
+# Density plots from CSV
+python -m reach.cli plot-from-csv \
+  --csv fig_summary/density_gue.csv \
+  --type density \
+  --ensemble GUE \
+  --y unreachable
+
+# K-sweep plots from CSV
+python -m reach.cli plot-from-csv \
+  --csv fig_summary/k30_gue.csv \
+  --type k-multi-tau \
+  --ensemble GUE \
+  --y reachable
+
+# Filter to specific tau values
+python -m reach.cli plot-from-csv \
+  --csv fig_summary/density_gue.csv \
+  --type density \
+  --ensemble GUE \
+  --y unreachable \
+  --taus 0.95,0.99
+```
+
+**Output**: PNG files (no computation, reads from CSV)
 
 ---
 
 ## Reproducibility
 
-### Deterministic Seeding
-
-All stochastic operations controlled by `settings.SEED = 42`:
+All runs are deterministic when using the same seed:
 
 ```python
-from reach import settings, models
-
-models.setup_environment(settings.SEED)  # Sets numpy and QuTiP seeds globally
+# In settings.py
+SEED = 42  # Default random seed
 ```
 
-Individual functions accept explicit `seed` parameter:
-
-```python
-hams = models.random_hamiltonian_ensemble(d=6, k=3, ensemble='GOE', seed=42)
-states = models.random_states(n=10, dim=6, seed=43)
-```
-
-### Configuration Management
-
-**Single source of truth**: `reach/settings.py`
-
-All constants, defaults, and experiment parameters defined centrally:
-
-```python
-# Reproducibility
-SEED = 42
-
-# Optimization
-DEFAULT_TAU = 0.95
-DEFAULT_METHOD = "L-BFGS-B"
-DEFAULT_MAXITER = 200
-
-# Sampling
-FAST_SAMPLING = (80, 20)    # (nks, nst) for quick runs (~30 min)
-FULL_SAMPLING = (150, 30)   # (nks, nst) for production (~2 hours)
-
-# Visualization
-DISPLAY_FLOOR = 1e-12       # Floor for log plots
-DEFAULT_DPI = 150
-```
-
-To modify experiments, edit `settings.py` (no code changes elsewhere needed).
-
-### Log Parameters on Plots
-
-All figures annotate key parameters for traceability:
-- Dimensions (d), Hamiltonian count (K)
-- Threshold (τ)
-- Grid size, S range (for landscapes)
-- Sampling (nks, nst) in filenames or captions
+Key config in `settings.py`:
+- `FULL_SAMPLING = (30, 15)` → nks=30, nst=15 (450 trials)
+- `FAST_SAMPLING = (5, 3)` → nks=5, nst=3 (15 trials)
+- `DISPLAY_FLOOR = 1e-12` → Floor for log plots
+- `DEFAULT_TAU = 0.95` → Default spectral threshold
 
 ---
 
-## CLI Usage
-
-### Global Flags
+## Testing
 
 ```bash
---ensemble {GOE,GUE}  # Random matrix ensemble (default: GOE)
---fast                # Use fast sampling (nks=80, nst=20)
---seed N              # Override random seed (default: 42)
---verbose             # Enable INFO-level logging
---summary             # Output to fig_summary/ directory
---outdir DIR          # Custom output directory
-```
-
-### Subcommands
-
-#### `landscape-S` — Generate S(λ₁,λ₂) Landscapes
-
-```bash
-# Fast mode (grid=41, quick)
-python -m reach.cli --ensemble GOE --fast --verbose --summary \
-  landscape-S -d 10 -k 3 --grid 41 --plot-3d
-
-# Full mode (grid=81, smoother)
-python -m reach.cli --ensemble GUE --verbose --summary \
-  landscape-S -d 10 -k 3 --grid 81 --plot-3d
-```
-
-**Output**: `landscape_S2D_{ensemble}_d{d}_k{k}.png`, `landscape_S3D_{ensemble}_d{d}_k{k}.png`
-
-#### `tau-hist` — Threshold Sensitivity Histograms
-
-```bash
-# Fast mode
-python -m reach.cli --ensemble GOE --fast --verbose --summary \
-  tau-hist --dims 6,10 -k 3 --taus 0.90,0.95
-
-# Full mode (10 τ values)
-python -m reach.cli --ensemble GUE --verbose --summary \
-  tau-hist --dims 6,10,14,18 -k 4 --taus 0.90,0.91,0.92,0.93,0.94,0.95,0.96,0.97,0.98,0.99
-```
-
-**Output**: `tau_hist_{ensemble}.png`
-
-#### `optimizer-hist` — Optimizer Comparison
-
-```bash
-# Compare 3 methods
-python -m reach.cli --ensemble GOE --fast --verbose --summary \
-  optimizer-hist --dims 6,10 --kmax 4 --methods L-BFGS-B,CG,Powell
-```
-
-**Output**: `optimizer_overlap_hist_{ensemble}.png`
-
-#### `iter-sweep` — Convergence Analysis
-
-```bash
-# Test iteration counts [10, 20, 50, 100]
-python -m reach.cli --ensemble GUE --fast --verbose --summary \
-  iter-sweep -d 6 -k 3 --iters 10,20,50,100
-```
-
-**Output**: `iter_sweep_prob_{ensemble}.png`
-
-#### `audit-old-criterion` — Compare Old vs New Criteria
-
-```bash
-# Generate rank comparison plots for τ ∈ {0.90, 0.95, 0.99}
-python -m reach.cli --ensemble GOE --fast --verbose --summary \
-  audit-old-criterion --dims 3,4,6 --k-values 2,3,4
-```
-
-**Output**: `unreachability_vs_rank_old_vs_new_{ensemble}.png`
-
-### Batch Figure Generation
-
-Run all figures (18 files total):
-
-```bash
-# Fast mode (~30 minutes)
-python scripts/generate_summary_figs.py
-
-# Specific figure type only
-python scripts/generate_overlap_hists.py
-```
-
----
-
-## Python API Usage
-
-### Basic Reachability Analysis
-
-```python
-from reach import settings, models, mathematics, optimize
-
-# Setup
-models.setup_environment(settings.SEED)
-d, k = 6, 3
-
-# Generate Hamiltonians and states
-hams = models.random_hamiltonian_ensemble(d, k, 'GOE', seed=42)
-psi = models.fock_state(d, 0)  # Initial state |0⟩
-phi = models.random_states(1, d, seed=43)[0]  # Random target
-
-# Maximize spectral overlap
-result = optimize.maximize_spectral_overlap(
-    psi, phi, hams,
-    method='L-BFGS-B', restarts=2, maxiter=200, seed=42
-)
-
-print(f"S* = {result['best_value']:.4f}")
-print(f"λ* = {result['best_x']}")
-print(f"Runtime = {result['runtime_s']:.2f}s")
-print(f"Function evals = {result['nfev']}")
-```
-
-### Monte Carlo Unreachability
-
-```python
-from reach import analysis
-
-# Compute P_unreach(d,k;τ) over parameter grid
-results = analysis.monte_carlo_unreachability(
-    dims=[4, 6, 8], ks=[2, 3, 4],
-    ensemble='GOE', tau=0.95,
-    nks=80, nst=20, seed=42
-)
-
-for (d, k), p in results.items():
-    print(f"P_unreach({d},{k};0.95) = {p:.4f}")
-```
-
-### Generate Custom Plot
-
-```python
-from reach import analysis, viz
-import numpy as np
-
-# Compute tau sweep
-data = analysis.probability_vs_tau(
-    dims=[6, 10], taus=np.linspace(0.90, 0.99, 10), k=3,
-    ensemble='GOE', nks_tau=80, nst_tau=20, seed=42
-)
-
-# Plot
-paths = viz.plot_tau_histograms(data, ensemble='GOE', output_dir='my_figs')
-print(f"Saved: {paths}")
-```
-
-### Landscape Visualization
-
-```python
-from reach import analysis, viz
-
-# Compute S(λ₁, λ₂) over grid
-L1, L2, S = analysis.landscape_spectral_overlap(
-    d=10, k=3, ensemble='GOE', grid=81, n_targets=40, seed=42
-)
-
-# Generate 2D and 3D plots
-viz.plot_landscape_S2D(L1, L2, S, d=10, k=3, ensemble='GOE', output_dir='figs')
-viz.plot_landscape_S3D(L1, L2, S, d=10, k=3, ensemble='GOE', output_dir='figs')
-```
-
----
-
-## Development Setup
-
-### Installation
-
-```bash
-# Clone repository
-git clone https://github.com/TomaszAnd/reach.git
-cd reach
-
-# Create virtual environment
-python3.10 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install package with dev dependencies
-pip install -e .[dev]
-
-# Install pre-commit hooks
-pre-commit install
-```
-
-### Running Tests
-
-```bash
-# Run all smoke tests
+# Smoke tests (fast)
 pytest tests/ -v
 
-# Run specific test
-pytest tests/test_smoke.py::test_spectral_overlap_bounds -v
+# Implementation validation
+python validate_implementation.py
 
-# Check coverage (optional)
-pytest --cov=reach tests/
+# Streaming mode validation
+python validate_streaming_mode.py
 ```
 
-### Code Quality
+---
 
-```bash
-# Format code
-black .
-isort .
+## Contributing (AI Assistants)
 
-# Lint
-ruff check .
+For detailed workflows, conventions, and checklists for AI coding assistants, see:
 
-# Run all pre-commit hooks manually
-pre-commit run --all-files
-```
+**[CLAUDE.md](CLAUDE.md)** - Complete guide for Claude Code Chat and other AI assistants
 
-### Continuous Integration
-
-GitHub Actions automatically runs on every push/PR:
-- Black formatting check
-- isort import sorting check
-- Ruff linting
-- Smoke tests on Python 3.10, 3.11, 3.12
-
-See `.github/workflows/lint.yml` for configuration.
+Key points:
+- Small, atomic PRs
+- Incremental edits (prefer `Edit` over full rewrites)
+- Run validation after changes
+- Update docs alongside code
+- Use streaming CSV for long runs
+- Reference production docs for detailed workflows
 
 ---
 
-## Performance Notes
+## Documentation
 
-| Task | Fast Mode (80,20) | Full Mode (150,30) | Notes |
-|------|-------------------|-------------------|-------|
-| Tau hist (5 dims, 5 τs) | ~5 min | ~15 min | Parallelizable over dims |
-| Optimizer (3 methods, 5 dims) | ~8 min | ~25 min | Linear in methods × dims |
-| Iter sweep (5 dims, 3 iters) | ~3 min | ~10 min | Scales with nks × nst × iters |
-| Landscape (grid=41) | ~5 min | ~15 min (grid=81) | Quadratic in grid size |
-| Rank comparison (10 dims, 6 ks, 3 τs) | ~30 min | ~90 min | Old criterion is expensive |
-
-**Total (all figures)**: ~50 min (fast), ~2.5 hours (full)
-
-**Scaling**: Runtime ∝ nks × nst × maxiter × d³ (eigendecomposition dominance)
-
----
-
-## Results Summary
-
-Typical trends observed across ensembles:
-
-1. **P(unreachability) vs K**: Increases with Hamiltonian count K. More Hamiltonians → sparser accessible subspace → harder to reach target.
-
-2. **P(unreachability) vs d**: Increases with dimension d. Higher-dimensional spaces → exponentially larger state space → target less likely reachable.
-
-3. **Threshold sensitivity**: P(unreachability) drops sharply near τ ≈ 0.95-0.98. Below this, most targets reachable; above, most unreachable. Critical transition region.
-
-4. **GOE vs GUE**: GUE (complex) shows slightly lower unreachability than GOE (real) for same (d,K,τ). Likely due to richer structure in complex ensembles.
-
-5. **Optimizer robustness**: L-BFGS-B consistently achieves highest S* with fewest function evaluations. CG and Powell comparable but slower convergence.
-
-6. **Convergence**: P(unreachability) stabilizes after ~50-100 iterations for L-BFGS-B. Diminishing returns beyond 100 iterations.
+| Doc | Purpose |
+|-----|---------|
+| [README.md](README.md) | This file - overview and quick start |
+| [CLAUDE.md](CLAUDE.md) | AI assistant workflows and conventions |
+| [README_PRODUCTION.md](README_PRODUCTION.md) | Quick start for production runs |
+| [PRODUCTION_RUN_GUIDE.md](PRODUCTION_RUN_GUIDE.md) | Runtime estimates, monitoring, troubleshooting |
+| [PRODUCTION_RUN_SUMMARY.md](PRODUCTION_RUN_SUMMARY.md) | Expected outputs, validation steps |
+| [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) | Implementation details, validation results |
+| [KRYLOV_README.md](KRYLOV_README.md) | Krylov criterion mathematical details |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
 
 ---
 
-## Known Limitations & Future Work
+## Citation
 
-### Current Limitations
-
-1. **Sampling Variance**: Fast mode (80 samples) has higher variance than full mode (150 samples). Error bars reflect SEM, but individual runs may vary ±5-10%. Use full mode for publication-quality results.
-
-2. **Floor Artifacts**: Values ≤ `DISPLAY_FLOOR = 1e-12` shown as isolated points without connecting lines in log plots. Prevents vertical artifacts but can make curves appear discontinuous.
-
-3. **Old Criterion τ-Free**: The old moment-based criterion does NOT use threshold τ (uses definiteness check). Direct numerical comparison with new criterion requires careful interpretation. Plots annotate this explicitly.
-
-4. **2D Landscape Slices**: Only (λ₁, λ₂) visualized. Higher-dimensional landscapes (K > 2) not plotted. Could use PCA or t-SNE for K > 2.
-
-5. **Single Initial State**: All analysis uses |0⟩ as initial state. General initial states |ψ⟩ not yet parameterized (trivial to extend).
-
-6. **No GPU Acceleration**: Eigendecomposition on CPU. For very large d (>100), could benefit from GPU-accelerated linear algebra.
-
-### Future Enhancements
-
-- **Parallel Monte Carlo**: Distribute Hamiltonian/target sampling across cores for 4-8× speedup
-- **Adaptive Sampling**: Use variance estimates to allocate samples where uncertainty is high
-- **Clifford Group Symmetry**: Exploit symmetries to reduce sampling requirements by ~2×
-- **General Initial States**: Support arbitrary |ψ⟩ instead of only |0⟩
-- **Benchmark Suite**: Standard test problems with known ground truth for validation
-- **Interactive Dashboard**: Streamlit/Dash app for real-time parameter exploration
-- **GPU Support**: cupy/JAX port for large-scale eigendecomposition (d > 50)
-
----
-
-## License & Citation
-
-### License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-### Citation
-
-If you use this software in your research, please cite:
+If you use this code, please cite:
 
 ```bibtex
 @software{reach2025,
   title = {reach: Time-Free Quantum Reachability Analysis},
-  author = {TomaszAnd},
+  author = {Your Name},
   year = {2025},
-  version = {0.1.0},
-  url = {https://github.com/TomaszAnd/reach}
+  url = {https://github.com/yourusername/reachability}
 }
 ```
 
-See [CITATION.cff](CITATION.cff) for machine-readable citation metadata.
+See [CITATION.cff](CITATION.cff) for full metadata.
 
 ---
 
-## Contact
+## License
 
-For questions, issues, or contributions:
-- **Issues**: https://github.com/TomaszAnd/reach/issues
-- **Email**: TomaszAnd@users.noreply.github.com
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-## Changelog
+## Quick Reference Card
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
+```bash
+# Fast demo (5-10 min)
+./run_production_sweeps_FAST.sh
+
+# Full production (2-3 hrs, background)
+nohup ./run_production_sweeps.sh > production.log 2>&1 &
+
+# Monitor progress
+tail -f production.log
+
+# Refresh plots from CSV (while running)
+./scripts/plot_refresh.sh
+
+# Plot from CSV (manual)
+python -m reach.cli plot-from-csv --csv fig_summary/density_gue.csv --type density --ensemble GUE --y unreachable
+
+# Validation
+python validate_implementation.py
+python validate_streaming_mode.py
+
+# Help
+python -m reach.cli --help
+python -m reach.cli three-criteria-vs-density --help
+```
+
+---
+
+**Version**: 0.1.0
+**Last updated**: 2025-10-22
+**Python**: 3.10+
+**Status**: Production-ready with streaming CSV and incremental plotting
