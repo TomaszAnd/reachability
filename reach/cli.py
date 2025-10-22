@@ -506,7 +506,7 @@ Examples:
     cmd_plot_csv.add_argument(
         "--ensemble",
         type=str,
-        choices=["GOE", "GUE"],
+        choices=["GOE", "GUE", "GEO2"],
         default="GUE",
         help="Random matrix ensemble (default: GUE)",
     )
