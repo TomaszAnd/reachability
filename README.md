@@ -19,7 +19,7 @@
 ### Key Features
 
 - **Time-free analysis**: No explicit time evolution required
-- **Random matrix ensembles**: GOE, GUE, and GEO2 (geometric two-local on lattices) support
+- **Random matrix ensembles**: GOE, GUE, and [GEO2](https://arxiv.org/html/2510.06321v1) (geometric two-local on qubit lattices, d=2^n) support
 - **Monte Carlo estimation**: Robust probability estimates with error bars
 - **Streaming mode**: CSV written incrementally, enables resumable runs and partial plotting
 - **Floor-aware plotting**: No vertical "cliffs" at display floor (1e-12)
@@ -66,6 +66,9 @@ python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
 # GEO2 requires power-of-2 dimensions: d = 2^(nx×ny)
 # Use --nx, --ny to specify lattice shape
 # Optional: --periodic for periodic boundary conditions
+# Note: Some figure filenames use historical labels (e.g., "d20")
+#       while GEO2 runs use actual qubit dimensions (d=16, 32, etc.)
+#       CSVs record the true dimensions used.
 ```
 
 ### Plot from Existing CSV (No Recomputation)

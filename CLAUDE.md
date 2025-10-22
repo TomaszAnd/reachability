@@ -114,6 +114,10 @@ python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
 # Verification: Check operator count L = 3n + 9|E|
 # For 2×2 open: n=4 sites, |E|=4 edges → L = 12 + 36 = 48 ✓
 # For 2×2 periodic: n=4 sites, |E|=8 edges → L = 12 + 72 = 84 ✓
+
+# GEO2 ensemble definition: https://arxiv.org/html/2510.06321v1
+# Note: GEO2 uses qubit lattices with d=2^n (power-of-2 dimensions only)
+#       Some historical figure names use "d20" labels, but CSVs record actual d
 ```
 
 ### Refreshing Plots from CSV (Streaming Mode)
