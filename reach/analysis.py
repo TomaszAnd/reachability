@@ -13,15 +13,15 @@ separation of concerns.
 
 Key Probability Estimates:
 
-1. **Unreachability Probability** (new criterion):
+1. **Unreachability Probability** (spectral criterion):
    P_unreach(d, K; τ) = Pr[ max_{λ ∈ [-1,1]ᴷ} S(λ) < τ ]
 
    Estimated via Monte Carlo sampling over Hamiltonian ensembles and target states.
    If S* < τ, the target is classified as unreachable.
 
-2. **Old Criterion** (τ-free, moment-based):
-   Uses definiteness check on second moment matrix. Included for comparison
-   with new spectral overlap criterion. Does NOT use threshold τ.
+2. **Moment Criterion** (τ-free, Gram matrix-based):
+   Uses definiteness check on Gram matrix eigenvalues. Included for comparison
+   with spectral criterion. Does NOT use threshold τ.
 
 Statistical Tools:
 - **Binomial SEM**: SEM(p) = √(p(1-p)/N) for error bars
@@ -844,7 +844,7 @@ def collect_Sstar_for_dims(
     return results
 
 
-def old_criterion_probabilities(
+def moment_criterion_probabilities(
     dims: List[int],
     k_values: List[int],
     ensemble: str,
@@ -853,10 +853,10 @@ def old_criterion_probabilities(
     seed: Optional[int] = None,
 ) -> Dict[Tuple[int, int], float]:
     """
-    Compute P(unreachability) using the old moment-based criterion.
+    Compute P(unreachability) using the moment criterion (Gram matrix definiteness).
 
-    Implements the classical moment-based reachability criterion from the
-    reference notebook for comparison with the new spectral overlap method.
+    Implements the moment-based reachability criterion using Gram matrix
+    eigenvalue analysis for comparison with the spectral criterion.
 
     Args:
         dims: List of Hilbert space dimensions
@@ -879,7 +879,7 @@ def old_criterion_probabilities(
 
     log = logging.getLogger(__name__)
     log.info(
-        f"Computing old criterion probabilities: ensemble={ensemble}, dims={dims}, k_values={k_values}"
+        f"Computing moment criterion probabilities: ensemble={ensemble}, dims={dims}, k_values={k_values}"
     )
 
     def expect_array_of_operators(ops, state):
@@ -947,7 +947,7 @@ def old_criterion_probabilities(
                         energy_sq_state = expect_array_of_operators(hs_anticomms, target_state)
                         m_final = kernel.T @ (energy_sq_state - energy_sq_zero) @ kernel
 
-                        # Check definiteness (old criterion)
+                        # Check definiteness (moment criterion)
                         if check_eigenvalues(m_final):
                             unreachable_count += 1
 
@@ -959,7 +959,7 @@ def old_criterion_probabilities(
 
             log.info(f"    P(unreachable) = {probability:.4f} ({unreachable_count}/{total_count})")
 
-    log.info("Old criterion computation complete")
+    log.info("Moment criterion computation complete")
     return results
 
 
@@ -968,7 +968,7 @@ def monte_carlo_unreachability_vs_m(
     m_values: List[int],
     K: int,
     ensemble: str,
-    criteria: Tuple[str, ...] = ("krylov", "spectral", "old"),
+    criteria: Tuple[str, ...] = ("krylov", "spectral", "moment"),
     tau: float = settings.DEFAULT_TAU,
     nks: int = settings.FULL_SAMPLING[0],
     nst: int = settings.FULL_SAMPLING[1],
@@ -983,7 +983,7 @@ def monte_carlo_unreachability_vs_m(
     For fixed (d, K), sweeps Krylov rank m and evaluates:
     - Krylov criterion: Check if φ ∈ K_m(H, ψ) via rank test
     - Spectral overlap: Check if max_λ S(λ) < τ
-    - Old criterion: Moment-based definiteness check
+    - Moment criterion: Gram matrix definiteness check
 
     Args:
         d: Hilbert space dimension
@@ -1062,8 +1062,8 @@ def monte_carlo_unreachability_vs_m(
                 # Sample random target states
                 targets = models.random_states(nst, d, seed=rng.randint(0, 2**31 - 1))
 
-                # Pre-compute old criterion data (once per Hamiltonian ensemble)
-                if criterion == "old":
+                # Pre-compute moment criterion data (once per Hamiltonian ensemble)
+                if criterion == "moment":
                     from scipy.linalg import null_space
 
                     def expect_array_of_operators(ops, state):
@@ -1115,8 +1115,8 @@ def monte_carlo_unreachability_vs_m(
                         spectral_best_values.append(result["best_value"])
                         is_unreach = result["best_value"] < tau
 
-                    elif criterion == "old":
-                        # Old criterion (moment-based) - uses pre-computed data
+                    elif criterion == "moment":
+                        # Moment criterion (Gram matrix-based) - uses pre-computed data
                         # Compute energy differences
                         energies_state = expect_array_of_operators(hams, phi)
                         diff = energies_state - energies_zero
@@ -1190,7 +1190,7 @@ def monte_carlo_unreachability_vs_K_three(
     Sweeps K (number of Hamiltonians) and evaluates all 3 criteria:
     - Krylov: m determined by strategy ("K" → m=K, or fixed value)
     - Spectral: max_λ S(λ) < τ
-    - Old: Moment-based criterion
+    - Moment: Gram matrix-based criterion
 
     Args:
         d: Hilbert space dimension (fixed)
@@ -1329,7 +1329,7 @@ def monte_carlo_unreachability_vs_K_three(
                 if result["best_value"] < tau:
                     unreach_spectral += 1
 
-                # --- Old criterion (uses pre-computed data) ---
+                # --- Moment criterion (uses pre-computed data) ---
                 energies_state = expect_array_of_operators(hams, phi)
                 diff = energies_state - energies_zero
 
@@ -1521,7 +1521,7 @@ def monte_carlo_unreachability_vs_density(
                     eigenvalues = np.linalg.eigvalsh(matrix)
                     return np.all(eigenvalues > 0) or np.all(eigenvalues < 0)
 
-                # Anticommutators for old criterion
+                # Anticommutators for moment criterion
                 hs_anticomms = [[None for _ in range(K)] for _ in range(K)]
                 for i in range(K):
                     for j in range(K):
@@ -1552,7 +1552,7 @@ def monte_carlo_unreachability_vs_density(
                     )
                     spectral_best_values.append(result["best_value"])
 
-                    # Old criterion
+                    # Moment criterion
                     energies_state = expect_array_of_operators(hams, phi)
                     diff = energies_state - energies_zero
                     kernel = null_space(diff.reshape(1, -1))
@@ -1577,7 +1577,7 @@ def monte_carlo_unreachability_vs_density(
 
         # Now process results for each (tau, criterion) combination
         for tau in taus:
-            for criterion in ["spectral", "old", "krylov"]:
+            for criterion in ["spectral", "moment", "krylov"]:
                 K_list, rho_list, p_list, err_list = [], [], [], []
                 mean_overlap_list, sem_overlap_list = [], []
 
@@ -1601,7 +1601,7 @@ def monte_carlo_unreachability_vs_density(
                         unreach = data["unreach_krylov"]
                         p = unreach / total if total > 0 else 0.0
 
-                    elif criterion == "old":
+                    elif criterion == "moment":
                         unreach = data["unreach_old"]
                         p = unreach / total if total > 0 else 0.0
 
@@ -1798,7 +1798,7 @@ def monte_carlo_unreachability_vs_K_multi_tau(
         }
 
     # Process old and krylov (tau-independent)
-    for criterion in ["old", "krylov"]:
+    for criterion in ["moment", "krylov"]:
         p_list, err_list = [], []
 
         for K in k_values:

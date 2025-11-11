@@ -53,6 +53,12 @@ from . import settings
 logger = logging.getLogger(__name__)
 
 
+# ================================================================================
+# SHARED UTILITIES
+# ================================================================================
+# General mathematical utilities used across all reachability criteria
+
+
 def validate_hermitian(
     H: Union[qutip.Qobj, np.ndarray], tolerance: float = settings.OVERLAP_TOLERANCE
 ) -> bool:
@@ -326,6 +332,41 @@ def validate_quantum_state(state: qutip.Qobj, tolerance: float = 1e-10) -> bool:
     # Check normalization
     norm = state.norm()
     return abs(norm - 1.0) < tolerance
+
+
+# ================================================================================
+# SPECTRAL CRITERION FUNCTIONS (τ-based overlap maximization)
+# ================================================================================
+# Core principle: max_λ S(λ) < τ → unreachable
+#
+# The spectral criterion uses eigendecomposition to compute the spectral overlap
+# S(λ) = Σₙ |⟨n(λ)|φ⟩* ⟨n(λ)|ψ⟩|, where |n(λ)⟩ are eigenstates of H(λ).
+# Unreachability is determined by comparing max_λ S(λ) against threshold τ.
+#
+# Key function:
+# - spectral_overlap(): Compute S(λ) for given parameters
+#
+# Dependencies: optimize.py provides the maximization over λ
+
+
+# Note: spectral_overlap() is defined earlier at line 166
+# (placed in utilities section for historical reasons, logically belongs here)
+
+
+# ================================================================================
+# KRYLOV CRITERION FUNCTIONS (subspace projection-residual)
+# ================================================================================
+# Core principle: ‖|φ⟩ - |φ_proj⟩‖ > ε → unreachable
+#
+# The Krylov criterion tests whether the target state |φ⟩ lies in the Krylov
+# subspace K_m(H, |ψ⟩) = span{|ψ⟩, H|ψ⟩, H²|ψ⟩, ..., H^(m-1)|ψ⟩}.
+# Uses Arnoldi iteration (modified Gram-Schmidt) to construct orthonormal basis.
+#
+# Functions:
+# - krylov_basis(): Construct orthonormal basis of K_m via Arnoldi iteration
+# - is_unreachable_krylov(): Apply projection-residual test
+#
+# No optimization required (analytical test on subspace membership)
 
 
 def krylov_basis(
