@@ -2674,7 +2674,7 @@ def plot_density_from_csv(
     csv_path: str,
     ensemble: str,
     y_axis: str = "unreachable",
-    outdir: str = "fig_summary/",
+    outdir: str = "fig/comparison/",
     taus: Optional[List[float]] = None,
 ) -> List[str]:
     """
@@ -2858,7 +2858,7 @@ def plot_k_multi_tau_from_csv(
     csv_path: str,
     ensemble: str,
     y_type: str = "unreachable",
-    outdir: str = "fig_summary/",
+    outdir: str = "fig/comparison/",
     taus: Optional[List[float]] = None,
 ) -> List[str]:
     """
