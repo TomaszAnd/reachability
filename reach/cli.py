@@ -1117,7 +1117,7 @@ def cmd_three_criteria_vs_K(args) -> None:
         timestamp = datetime.now().isoformat()
         rows = []
 
-        criteria = ["krylov", "spectral", "old"]
+        criteria = ["krylov", "spectral", "moment"]
         for criterion in criteria:
             p_key = f"p_{criterion}"
             if p_key not in data:
@@ -1238,7 +1238,7 @@ def cmd_three_criteria_vs_density(args) -> None:
         ) as csv_writer:
             row_count = 0
             for tau in taus:
-                for criterion in ["spectral", "old", "krylov"]:
+                for criterion in ["spectral", "moment", "krylov"]:
                     for d in dims:
                         key = (d, tau, criterion)
                         if key not in data:
@@ -1376,8 +1376,8 @@ def cmd_three_criteria_vs_K_multi_tau(args) -> None:
                     csv_writer.write_row(row)
                     row_count += 1
 
-            # Log old and krylov (tau-independent)
-            for criterion in ["old", "krylov"]:
+            # Log moment and krylov (tau-independent)
+            for criterion in ["moment", "krylov"]:
                 result = data[criterion]
                 p_vals = result["p"]
 

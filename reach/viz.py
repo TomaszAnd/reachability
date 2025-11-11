@@ -1917,7 +1917,7 @@ def plot_unreachability_three_criteria_vs_m(
     # Define styling for each criterion
     styles = {
         "spectral": {"marker": "o", "color": "C0", "label": f"Spectral overlap (τ={tau:.2f})"},
-        "old": {"marker": "s", "color": "C1", "label": "Old criterion"},
+        "moment": {"marker": "s", "color": "C1", "label": "Moment criterion"},
         "krylov": {"marker": "^", "color": "C2", "label": "Krylov rank"},
     }
 
@@ -2031,7 +2031,7 @@ def plot_unreachability_three_criteria_vs_K(
     # Define styling for each criterion
     styles = {
         "spectral": {"marker": "o", "color": "C0", "label": f"Spectral overlap (τ={tau:.2f})"},
-        "old": {"marker": "s", "color": "C1", "label": "Old criterion"},
+        "moment": {"marker": "s", "color": "C1", "label": "Moment criterion"},
         "krylov": {"marker": "^", "color": "C2", "label": f"Krylov rank ({m_label})"},
     }
 
@@ -2156,12 +2156,12 @@ def plot_unreachability_three_criteria_vs_density(
     # Define line styles and markers for each criterion
     criterion_styles = {
         "spectral": {"linestyle": "-", "marker": "o", "markersize": 6},
-        "old": {"linestyle": "--", "marker": "s", "markersize": 6},
+        "moment": {"linestyle": "--", "marker": "s", "markersize": 6},
         "krylov": {"linestyle": ":", "marker": "^", "markersize": 6},
     }
     criterion_labels = {
         "spectral": "Spectral",
-        "old": "Old",
+        "moment": "Moment",
         "krylov": "Krylov (m=min(K,d))",
     }
 
@@ -2169,7 +2169,7 @@ def plot_unreachability_three_criteria_vs_density(
         # Publication-ready figure size: 14×10 inches, DPI 200
         fig, ax = plt.subplots(figsize=(14, 10), dpi=200)
 
-        criteria = ["spectral", "old", "krylov"]
+        criteria = ["spectral", "moment", "krylov"]
 
         # Plot all combinations of (criterion, d)
         for criterion in criteria:
@@ -2430,26 +2430,26 @@ def plot_unreachability_K_multi_tau(
                     alpha=0.6,
                 )
 
-    # Plot old criterion (floor-aware)
-    p_old_unreach = data["old"]["p"]
+    # Plot moment criterion (floor-aware)
+    p_moment_unreach = data["moment"]["p"]
 
     # Transform for reachable if needed
     if y_type == "reachable":
-        p_old = 1.0 - p_old_unreach
-        p_old = np.maximum(p_old, floor)
+        p_moment = 1.0 - p_moment_unreach
+        p_moment = np.maximum(p_moment, floor)
     else:
-        p_old = p_old_unreach
+        p_moment = p_moment_unreach
 
-    is_floored_old = np.abs(p_old - floor) < floor * 0.01
+    is_floored_moment = np.abs(p_moment - floor) < floor * 0.01
 
     # Plot non-floored with masked array
-    p_old_masked = _create_floor_masked_array(p_old, floor)
+    p_moment_masked = _create_floor_masked_array(p_moment, floor)
     ax.plot(
         k,
-        p_old_masked,
+        p_moment_masked,
         marker="s",
         color="C1",
-        label="Old criterion",
+        label="Moment criterion",
         linestyle="--",
         markersize=6,
         linewidth=2.0,
@@ -2457,10 +2457,10 @@ def plot_unreachability_K_multi_tau(
     )
 
     # Plot floored points as faded markers
-    if np.any(is_floored_old):
+    if np.any(is_floored_moment):
         ax.plot(
-            k[is_floored_old],
-            p_old[is_floored_old],
+            k[is_floored_moment],
+            p_moment[is_floored_moment],
             marker="s",
             color="C1",
             linestyle="none",
@@ -2469,13 +2469,13 @@ def plot_unreachability_K_multi_tau(
         )
 
     if trials is not None and trials > 0:
-        err_lower, err_upper = _compute_asymmetric_errorbars(p_old, trials, floor=floor)
+        err_lower, err_upper = _compute_asymmetric_errorbars(p_moment, trials, floor=floor)
         yerr = np.vstack([err_lower, err_upper])
-        has_errbar = (err_lower > 0) | (err_upper > 0) & ~is_floored_old
+        has_errbar = (err_lower > 0) | (err_upper > 0) & ~is_floored_moment
         if np.any(has_errbar):
             ax.errorbar(
                 k[has_errbar],
-                p_old[has_errbar],
+                p_moment[has_errbar],
                 yerr=yerr[:, has_errbar],
                 fmt="none",
                 color="C1",
@@ -2563,7 +2563,7 @@ def plot_unreachability_K_multi_tau(
 
     # Add floor annotation if any curve hits the floor
     # Check if any points across all curves hit the floor
-    any_floored = is_floored_old.any() or is_floored_krylov.any()
+    any_floored = is_floored_moment.any() or is_floored_krylov.any()
     # Also check spectral curves
     for i, tau in enumerate(taus):
         key = (tau, "spectral")

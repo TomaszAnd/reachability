@@ -14,7 +14,7 @@ Schema for reachability CSV logs:
     run_id: Unique identifier for this experimental run (UUID or timestamp-based)
     timestamp: ISO 8601 timestamp when row was written
     ensemble: Random matrix ensemble ("GOE" or "GUE")
-    criterion: Reachability criterion ("spectral", "old", or "krylov")
+    criterion: Reachability criterion ("spectral", "moment", or "krylov")
     tau: Spectral-overlap threshold (filled for spectral only; empty for others)
     d: Hilbert space dimension
     K: Number of Hamiltonians (control parameters)
