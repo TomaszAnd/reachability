@@ -18,7 +18,7 @@ Subcommands:
 - tau-hist: Threshold sensitivity histograms
 - optimizer-hist: Optimizer comparison (S* distributions)
 - iter-sweep: Convergence analysis (iterations vs probability)
-- audit-old-criterion: Compare old (τ-free) vs new (τ-based) criteria
+- audit-moment-criterion: Compare moment (τ-free) vs spectral (τ-based) criteria
 
 All parameters pulled from settings.py for consistency and reproducibility.
 """
@@ -61,7 +61,7 @@ Examples:
   reach optimizer-hist --ensemble GOE -d 10 -k 5 --methods L-BFGS-B,CG,Powell
   reach iter-sweep --ensemble GUE -d 6 -k 5 --iters 10,50,100,200
   reach compare-rank --ensemble GOE --fast
-  reach audit-old-criterion --ensemble GUE --dims 3,4,6 --k-values 2,3,4 --fast
+  reach audit-moment-criterion --ensemble GUE --dims 3,4,6 --k-values 2,3,4 --fast
         """,
     )
 
@@ -216,7 +216,7 @@ Examples:
 
     # compare-rank subcommand (rescaled, no inset)
     cmd_rank = subparsers.add_parser(
-        "compare-rank", help="Generate old vs new criterion comparison (rescaled, no inset)"
+        "compare-rank", help="Generate moment vs spectral criterion comparison (rescaled, no inset)"
     )
     cmd_rank.add_argument(
         "--dims", type=str, default="6,8,10,12,14,16,18,20,24,30", help="Comma-separated dimensions (default: 6,8,10,12,14,16,18,20,24,30)"
@@ -249,9 +249,9 @@ Examples:
         help="Hide points with p <= eps_floor to avoid cliff artifacts (default: True)",
     )
 
-    # audit-old-criterion subcommand
+    # audit-moment-criterion subcommand
     cmd_audit = subparsers.add_parser(
-        "audit-old-criterion", help="Compare old vs new criterion probabilities"
+        "audit-moment-criterion", help="Compare moment vs spectral criterion probabilities"
     )
     cmd_audit.add_argument(
         "--dims", type=str, default="3,4,6,8", help="Comma-separated dimensions (default: 3,4,6,8)"
@@ -282,7 +282,7 @@ Examples:
 
     # rank-compare-zoom subcommand
     cmd_rank_zoom = subparsers.add_parser(
-        "rank-compare-zoom", help="Generate old vs new criterion comparison with zoomed inset"
+        "rank-compare-zoom", help="Generate moment vs spectral criterion comparison with zoomed inset"
     )
     cmd_rank_zoom.add_argument(
         "--dims", type=str, default="6,8,10,12", help="Comma-separated dimensions (default: 6,8,10,12)"
@@ -769,10 +769,10 @@ def cmd_compare_rank(args) -> None:
 
     logger.info(f"Rank comparison (rescaled): dims={dims}, taus={taus}, {args.ensemble}")
 
-    # Compute old criterion probabilities (τ-free, so compute once)
-    logger.info("Computing old criterion probabilities (τ-free)...")
+    # Compute moment criterion probabilities (τ-free, so compute once)
+    logger.info("Computing moment criterion probabilities (τ-free)...")
     k_values = list(range(2, args.kmax + 1))
-    old_results = analysis.old_criterion_probabilities(
+    moment_results = analysis.moment_criterion_probabilities(
         dims=dims,
         k_values=k_values,
         ensemble=args.ensemble,
@@ -785,9 +785,9 @@ def cmd_compare_rank(args) -> None:
     for tau in taus:
         logger.info(f"Processing tau={tau}...")
 
-        # Compute new criterion probabilities for this tau
-        logger.info(f"  Computing new criterion probabilities for τ={tau}...")
-        new_results = {}
+        # Compute spectral criterion probabilities for this tau
+        logger.info(f"  Computing spectral criterion probabilities for τ={tau}...")
+        spectral_results = {}
         for k in k_values:
             logger.info(f"    Processing k={k}")
             prob_data = analysis.probability_vs_tau(
@@ -803,12 +803,12 @@ def cmd_compare_rank(args) -> None:
             )
             for d in dims:
                 if k < d and d in prob_data:
-                    new_results[(d, k)] = prob_data[d]["p"][0]
+                    spectral_results[(d, k)] = prob_data[d]["p"][0]
 
         # Generate rescaled plot (no inset)
         saved_path = viz.plot_rank_comparison_rescaled(
-            old_results=old_results,
-            new_results=new_results,
+            moment_results=moment_results,
+            spectral_results=spectral_results,
             dims=dims,
             ensemble=args.ensemble,
             tau=tau,
@@ -821,17 +821,17 @@ def cmd_compare_rank(args) -> None:
         print(f"Saved: {saved_path}")
 
 
-def cmd_audit_old_criterion(args) -> None:
-    """Execute audit-old-criterion subcommand."""
+def cmd_audit_moment_criterion(args) -> None:
+    """Execute audit-moment-criterion subcommand."""
     dims = parse_comma_separated(args.dims, int)
     k_values = parse_comma_separated(args.k_values, int)
     nks, nst = get_sampling_params(args.fast)
 
-    logger.info(f"Auditing old criterion: dims={dims}, k_values={k_values}, {args.ensemble}")
+    logger.info(f"Auditing moment criterion: dims={dims}, k_values={k_values}, {args.ensemble}")
 
-    # Compute old criterion probabilities
-    logger.info("Computing old criterion probabilities...")
-    old_results = analysis.old_criterion_probabilities(
+    # Compute moment criterion probabilities
+    logger.info("Computing moment criterion probabilities...")
+    moment_results = analysis.moment_criterion_probabilities(
         dims=dims,
         k_values=k_values,
         ensemble=args.ensemble,
@@ -840,8 +840,8 @@ def cmd_audit_old_criterion(args) -> None:
         seed=args.seed,  # Reduced sampling for speed
     )
 
-    # Compute new criterion probabilities for comparison
-    logger.info("Computing new criterion probabilities...")
+    # Compute spectral criterion probabilities for comparison
+    logger.info("Computing spectral criterion probabilities...")
     new_results = {}
     for k in k_values:
         logger.info(f"  Processing k={k}")
@@ -858,7 +858,7 @@ def cmd_audit_old_criterion(args) -> None:
         )
         for d in dims:
             if k < d and d in prob_data:
-                new_results[(d, k)] = prob_data[d]["p"][0]
+                spectral_results[(d, k)] = prob_data[d]["p"][0]
 
     # Generate comparison plots
     saved_paths = viz.plot_rank_comparison(
@@ -873,7 +873,7 @@ def cmd_audit_old_criterion(args) -> None:
         print(f"Saved: {path}")
 
     # Print comparison summary
-    print("\nOld vs New Criterion Comparison:")
+    print("\nMoment vs Spectral Criterion Comparison:")
     print("=" * 50)
     for d in sorted(dims):
         print(f"Dimension d={d}:")
@@ -926,10 +926,10 @@ def cmd_rank_compare_zoom(args) -> None:
 
     logger.info(f"Rank comparison with zoom: dims={dims}, taus={taus}, {args.ensemble}")
 
-    # Compute old criterion probabilities (τ-free, so compute once)
-    logger.info("Computing old criterion probabilities (τ-free)...")
+    # Compute moment criterion probabilities (τ-free, so compute once)
+    logger.info("Computing moment criterion probabilities (τ-free)...")
     k_values = list(range(2, args.kmax + 1))
-    old_results = analysis.old_criterion_probabilities(
+    moment_results = analysis.moment_criterion_probabilities(
         dims=dims,
         k_values=k_values,
         ensemble=args.ensemble,
@@ -942,9 +942,9 @@ def cmd_rank_compare_zoom(args) -> None:
     for tau in taus:
         logger.info(f"Processing tau={tau}...")
 
-        # Compute new criterion probabilities for this tau
-        logger.info(f"  Computing new criterion probabilities for τ={tau}...")
-        new_results = {}
+        # Compute spectral criterion probabilities for this tau
+        logger.info(f"  Computing spectral criterion probabilities for τ={tau}...")
+        spectral_results = {}
         for k in k_values:
             logger.info(f"    Processing k={k}")
             prob_data = analysis.probability_vs_tau(
@@ -960,12 +960,12 @@ def cmd_rank_compare_zoom(args) -> None:
             )
             for d in dims:
                 if k < d and d in prob_data:
-                    new_results[(d, k)] = prob_data[d]["p"][0]
+                    spectral_results[(d, k)] = prob_data[d]["p"][0]
 
         # Generate plot with inset
         saved_path = viz.plot_rank_comparison_with_inset(
-            old_results=old_results,
-            new_results=new_results,
+            moment_results=moment_results,
+            spectral_results=spectral_results,
             dims=dims,
             ensemble=args.ensemble,
             tau=tau,
@@ -1494,7 +1494,7 @@ def main() -> None:
         # 'punreach-grid': cmd_punreach_grid,  # DISABLED
         "iter-sweep": cmd_iter_sweep,
         "compare-rank": cmd_compare_rank,
-        "audit-old-criterion": cmd_audit_old_criterion,
+        "audit-moment-criterion": cmd_audit_moment_criterion,
         "single-d-vs-k": cmd_single_d_vs_k,
         "rank-compare-zoom": cmd_rank_compare_zoom,
         "three-criteria-vs-m": cmd_three_criteria_vs_m,
