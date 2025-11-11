@@ -161,8 +161,14 @@ ITER_SWEEP_ITERS: List[int] = [10, 20, 50]
 # OUTPUT SETTINGS
 # ============================================================================
 
-#: Summary output directory for all figures
-FIG_SUMMARY_DIR: str = "fig_summary"
+#: New organized output directories
+FIG_COMPARISON_DIR: str = "fig/comparison"
+FIG_SPECTRAL_DIR: str = "fig/spectral_criterion"
+FIG_KRYLOV_DIR: str = "fig/krylov_criterion"
+FIG_MOMENT_DIR: str = "fig/moment_criterion"
+
+#: Backward compatibility (deprecated - use FIG_COMPARISON_DIR instead)
+FIG_SUMMARY_DIR: str = FIG_COMPARISON_DIR
 
 # ============================================================================
 # KRYLOV CRITERION SETTINGS

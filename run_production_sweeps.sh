@@ -24,7 +24,7 @@ echo "========================================="
 echo ""
 
 # Create output directory
-mkdir -p fig_summary
+mkdir -p fig/comparison
 
 # Configuration
 TRIALS_DENSITY=150  # For density sweeps (4 dimensions × ~16 ρ values × 3 τ)
@@ -42,13 +42,13 @@ python -m reach.cli --summary three-criteria-vs-density \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_DENSITY \
   --y unreachable \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable
@@ -65,13 +65,13 @@ python -m reach.cli --summary three-criteria-vs-density \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_DENSITY \
   --y reachable \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y reachable
@@ -87,13 +87,13 @@ python -m reach.cli --summary three-criteria-vs-K-multi-tau \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_K \
   --y unreachable \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --type k-multi-tau \
   --ensemble GUE \
   --y unreachable
@@ -109,13 +109,13 @@ python -m reach.cli --summary three-criteria-vs-K-multi-tau \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_K \
   --y reachable \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --type k-multi-tau \
   --ensemble GUE \
   --y reachable
@@ -125,7 +125,7 @@ echo "========================================="
 echo "PRODUCTION SWEEPS COMPLETE!"
 echo "========================================="
 echo ""
-echo "Generated files (fig_summary/):"
+echo "Generated files (fig/comparison/):"
 echo ""
 echo "Density plots (6 files):"
 echo "  - three_criteria_vs_density_GUE_tau0.90_unreachable.png"

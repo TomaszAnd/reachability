@@ -86,14 +86,14 @@ python -m reach.cli three-criteria-vs-density \
   --ensemble GUE --dims 20,30,40,50 \
   --rho-max 0.15 --rho-step 0.01 \
   --taus 0.90,0.95,0.99 --trials 150 \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --flush-every 10 --y unreachable
 
 # K-sweep
 python -m reach.cli three-criteria-vs-K-multi-tau \
   --ensemble GUE -d 30 --k-max 14 \
   --taus 0.90,0.95,0.99 --trials 300 \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --flush-every 10 --y unreachable
 ```
 
@@ -106,7 +106,7 @@ python -m reach.cli three-criteria-vs-K-multi-tau \
 python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
   --ensemble GEO2 -d 16 --k-max 10 \
   --taus 0.99 --trials 100 --y unreachable \
-  --csv fig_summary/k16_geo2.csv
+  --csv fig/comparison/k16_geo2.csv
 
 # Optional: --periodic for periodic boundary conditions
 # python -m reach.cli --nx 2 --ny 2 --periodic three-criteria-vs-K-multi-tau ...
@@ -137,7 +137,7 @@ python -m reach.cli --nx 2 --ny 2 three-criteria-vs-K-multi-tau \
 
 # Manual plot-from-csv command
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable
@@ -161,7 +161,7 @@ ps aux | grep reach.cli
 tail -f production.log
 
 # Check CSV growth
-watch -n 30 'wc -l fig_summary/density_gue.csv'
+watch -n 30 'wc -l fig/comparison/density_gue.csv'
 
 # Refresh plots periodically
 watch -n 300 './scripts/plot_refresh.sh density'
@@ -170,12 +170,12 @@ watch -n 300 './scripts/plot_refresh.sh density'
 **Check for completion**:
 ```bash
 # Verify output files
-ls -lh fig_summary/three_criteria_vs_density_GUE*.png
-ls -lh fig_summary/K_sweep_multi_tau_GUE*.png
+ls -lh fig/comparison/three_criteria_vs_density_GUE*.png
+ls -lh fig/comparison/K_sweep_multi_tau_GUE*.png
 
 # Count CSV rows
-wc -l fig_summary/density_gue.csv  # Should be ~193
-wc -l fig_summary/k30_gue.csv      # Should be ~66
+wc -l fig/comparison/density_gue.csv  # Should be ~193
+wc -l fig/comparison/k30_gue.csv      # Should be ~66
 ```
 
 ### Committing Changes
@@ -214,7 +214,7 @@ Instead of recomputing, read existing CSV and generate plots:
 ```bash
 # Generate plots from partial or complete CSV
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable \
@@ -222,7 +222,7 @@ python -m reach.cli plot-from-csv \
 
 # Optional: filter to specific tau values
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable \
@@ -378,8 +378,8 @@ kill <PID>
 kill -9 <PID>
 
 # Check what was saved
-ls -lh fig_summary/*.csv
-wc -l fig_summary/*.csv
+ls -lh fig/comparison/*.csv
+wc -l fig/comparison/*.csv
 ```
 
 **If plots are missing/wrong**:
@@ -388,7 +388,7 @@ wc -l fig_summary/*.csv
 ./scripts/plot_refresh.sh
 
 # Validate CSV schema
-python -c "import pandas as pd; df = pd.read_csv('fig_summary/density_gue.csv'); print(df.columns.tolist())"
+python -c "import pandas as pd; df = pd.read_csv('fig/comparison/density_gue.csv'); print(df.columns.tolist())"
 
 # Check for dimension violations
 python validate_implementation.py

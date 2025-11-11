@@ -19,8 +19,8 @@ echo "========================================="
 echo ""
 
 # Check for CSV files
-DENSITY_CSV="fig_summary/density_gue.csv"
-K_CSV="fig_summary/k30_gue.csv"
+DENSITY_CSV="fig/comparison/density_gue.csv"
+K_CSV="fig/comparison/k30_gue.csv"
 
 if [ "$PLOT_TYPE" = "all" ] || [ "$PLOT_TYPE" = "density" ]; then
     if [ -f "$DENSITY_CSV" ]; then
@@ -88,7 +88,7 @@ echo "========================================="
 echo "PLOT REFRESH COMPLETE"
 echo "========================================="
 echo ""
-echo "Generated plots are in fig_summary/"
+echo "Generated plots are in fig/comparison/"
 echo ""
 echo "💡 TIP: Run this script anytime while a long sweep is running"
 echo "   to see partial results from the growing CSV file."

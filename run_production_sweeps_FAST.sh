@@ -25,7 +25,7 @@ echo "========================================="
 echo ""
 
 # Create output directory
-mkdir -p fig_summary
+mkdir -p fig/comparison
 
 # Fast demonstration parameters
 TRIALS_DENSITY=25   # Reduced from 150
@@ -43,13 +43,13 @@ python -m reach.cli --summary three-criteria-vs-density \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_DENSITY \
   --y unreachable \
-  --csv fig_summary/density_gue_fast.csv \
+  --csv fig/comparison/density_gue_fast.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue_fast.csv \
+  --csv fig/comparison/density_gue_fast.csv \
   --type density \
   --ensemble GUE \
   --y unreachable
@@ -64,13 +64,13 @@ python -m reach.cli --summary three-criteria-vs-density \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_DENSITY \
   --y reachable \
-  --csv fig_summary/density_gue_fast.csv \
+  --csv fig/comparison/density_gue_fast.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue_fast.csv \
+  --csv fig/comparison/density_gue_fast.csv \
   --type density \
   --ensemble GUE \
   --y reachable
@@ -85,13 +85,13 @@ python -m reach.cli --summary three-criteria-vs-K-multi-tau \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_K \
   --y unreachable \
-  --csv fig_summary/k30_gue_fast.csv \
+  --csv fig/comparison/k30_gue_fast.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/k30_gue_fast.csv \
+  --csv fig/comparison/k30_gue_fast.csv \
   --type k-multi-tau \
   --ensemble GUE \
   --y unreachable
@@ -105,13 +105,13 @@ python -m reach.cli --summary three-criteria-vs-K-multi-tau \
   --taus 0.90,0.95,0.99 \
   --trials $TRIALS_K \
   --y reachable \
-  --csv fig_summary/k30_gue_fast.csv \
+  --csv fig/comparison/k30_gue_fast.csv \
   --flush-every $FLUSH_EVERY
 
 echo ""
 echo "   [Refreshing plots from CSV...]"
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/k30_gue_fast.csv \
+  --csv fig/comparison/k30_gue_fast.csv \
   --type k-multi-tau \
   --ensemble GUE \
   --y reachable
@@ -121,13 +121,13 @@ echo "========================================="
 echo "FAST DEMO COMPLETE!"
 echo "========================================="
 echo ""
-echo "Generated files (fig_summary/):"
+echo "Generated files (fig/comparison/):"
 echo ""
 echo "Density plots (6 files):"
-ls -1 fig_summary/three_criteria_vs_density_GUE_tau*_{unreachable,reachable}.png 2>/dev/null | tail -6
+ls -1 fig/comparison/three_criteria_vs_density_GUE_tau*_{unreachable,reachable}.png 2>/dev/null | tail -6
 echo ""
 echo "K-sweep plots (2 files):"
-ls -1 fig_summary/K_sweep_multi_tau_GUE_d30*_{unreachable,reachable}.png 2>/dev/null | tail -2
+ls -1 fig/comparison/K_sweep_multi_tau_GUE_d30*_{unreachable,reachable}.png 2>/dev/null | tail -2
 echo ""
 echo "CSV data (2 files):"
 echo "  - density_gue_fast.csv"
