@@ -300,8 +300,7 @@ k30_gue.csv          # K-sweep data (d=30, multiple tau)
 |------|---------|
 | `reach/cli.py` | Command-line interface, argument parsing, command dispatch |
 | `reach/analysis.py` | Pure computation: Monte Carlo loops, density/K sweeps |
-| `reach/viz.py` | Pure rendering: plot functions (uses matplotlib) |
-| `reach/viz_csv.py` | CSV-based plotting for partial/incremental results |
+| `reach/viz.py` | Pure rendering: plot functions (matplotlib), includes CSV-based plotting |
 | `reach/logging_utils.py` | CSV logging, `StreamingCSVWriter` class |
 | `reach/models.py` | GOE/GUE ensemble generation, random states |
 | `reach/mathematics.py` | Eigendecomposition, spectral overlap, Krylov tests |
@@ -338,7 +337,7 @@ For detailed production workflows, see:
 
 ### Adding a new plot type
 
-1. Implement plotting function in `viz.py` or `viz_csv.py`
+1. Implement plotting function in `viz.py` (supports both computed data and CSV input)
 2. Add CLI subcommand or extend existing one
 3. Update filename conventions in this file
 4. Add to plotting checklist
