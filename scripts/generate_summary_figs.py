@@ -11,8 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
-# Add reach package to path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add reach package to path (parent.parent gets us to the dir containing reach/)
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from reach import analysis, models, settings, viz
 
