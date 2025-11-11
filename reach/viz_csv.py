@@ -529,8 +529,8 @@ def _format_legend_label(criterion: str, tau: float, d: int) -> str:
     """Format legend label for density plots."""
     if criterion == "spectral":
         return f"Spectral (τ={tau:.2f}) • d={d}"
-    elif criterion == "old":
-        return f"Old • d={d}"
+    elif criterion == "moment":
+        return f"Moment • d={d}"
     elif criterion == "krylov":
         return f"Krylov (m=min(K,d)) • d={d}"
     else:
