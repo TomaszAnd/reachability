@@ -880,10 +880,10 @@ def cmd_audit_moment_criterion(args) -> None:
         for k in sorted(k_values):
             if k >= d:
                 continue
-            old_p = old_results.get((d, k), 0.0)
-            new_p = new_results.get((d, k), 0.0)
-            ratio = new_p / old_p if old_p > 0 else float("inf")
-            print(f"  k={k}: old={old_p:.4f}, new={new_p:.4f}, ratio={ratio:.2f}")
+            moment_p = moment_results.get((d, k), 0.0)
+            spectral_p = spectral_results.get((d, k), 0.0)
+            ratio = spectral_p / moment_p if moment_p > 0 else float("inf")
+            print(f"  k={k}: moment={moment_p:.4f}, spectral={spectral_p:.4f}, ratio={ratio:.2f}")
 
 
 def cmd_single_d_vs_k(args) -> None:
