@@ -842,7 +842,7 @@ def cmd_audit_moment_criterion(args) -> None:
 
     # Compute spectral criterion probabilities for comparison
     logger.info("Computing spectral criterion probabilities...")
-    new_results = {}
+    spectral_results = {}
     for k in k_values:
         logger.info(f"  Processing k={k}")
         prob_data = analysis.probability_vs_tau(
@@ -861,16 +861,16 @@ def cmd_audit_moment_criterion(args) -> None:
                 spectral_results[(d, k)] = prob_data[d]["p"][0]
 
     # Generate comparison plots
-    saved_paths = viz.plot_rank_comparison(
-        old_results=old_results,
-        new_results=new_results,
+    saved_path = viz.plot_rank_comparison(
+        moment_results=moment_results,
+        spectral_results=spectral_results,
         dims=dims,
         ensemble=args.ensemble,
+        tau=settings.DEFAULT_TAU,
         output_dir=args.outdir,
     )
 
-    for path in saved_paths:
-        print(f"Saved: {path}")
+    print(f"Saved: {saved_path}")
 
     # Print comparison summary
     print("\nMoment vs Spectral Criterion Comparison:")
