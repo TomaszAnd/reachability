@@ -46,9 +46,9 @@ def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE"]):
     for ensemble in ensembles:
         logger.info(f"\n{ensemble} ensemble...")
 
-        # Compute old criterion once (tau-free)
-        logger.info("  Computing old criterion (τ-free)...")
-        old_results = analysis.old_criterion_probabilities(
+        # Compute moment criterion once (tau-free)
+        logger.info("  Computing moment criterion (τ-free)...")
+        moment_results = analysis.moment_criterion_probabilities(
             dims=dims,
             k_values=k_values,
             ensemble=ensemble,
@@ -57,10 +57,10 @@ def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE"]):
             seed=settings.SEED,
         )
 
-        # For each tau, compute new criterion and generate plot
+        # For each tau, compute spectral criterion and generate plot
         for tau in settings.RANK_TAUS_3:
-            logger.info(f"  Computing new criterion for τ={tau}...")
-            new_results = analysis.monte_carlo_unreachability(
+            logger.info(f"  Computing spectral criterion for τ={tau}...")
+            spectral_results = analysis.monte_carlo_unreachability(
                 dims=dims,
                 ks=k_values,
                 ensemble=ensemble,
@@ -72,8 +72,8 @@ def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE"]):
 
             # Generate plot
             path = viz.plot_rank_comparison(
-                old_results=old_results,
-                new_results=new_results,
+                moment_results=moment_results,
+                spectral_results=spectral_results,
                 dims=dims,
                 ensemble=ensemble,
                 tau=tau,
