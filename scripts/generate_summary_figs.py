@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE"]):
+def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE", "GEO2"]):
     """
     Generate rank comparison plots for multiple tau values (6 files total).
 
@@ -77,12 +77,12 @@ def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE"]):
                 dims=dims,
                 ensemble=ensemble,
                 tau=tau,
-                output_dir=settings.FIG_SUMMARY_DIR,
+                output_dir=settings.FIG_SPECTRAL_DIR,
             )
             logger.info(f"  ✓ {path}")
 
 
-def generate_optimizer_comparison(ensembles=["GOE", "GUE"]):
+def generate_optimizer_comparison(ensembles=["GOE", "GUE", "GEO2"]):
     """Generate optimizer comparison figures (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING OPTIMIZER COMPARISON")
@@ -116,12 +116,12 @@ def generate_optimizer_comparison(ensembles=["GOE", "GUE"]):
                     logger.info(f"  {method:12} d={d:2}: S* = {mean_S:.4f} ± {sem_S:.4f}")
 
         path = viz.plot_optimizer_comparison(
-            data, ensemble=ensemble, output_dir=settings.FIG_SUMMARY_DIR
+            data, ensemble=ensemble, output_dir=settings.FIG_SPECTRAL_DIR
         )
         logger.info(f"  ✓ {path}")
 
 
-def generate_tau_histograms(ensembles=["GOE", "GUE"]):
+def generate_tau_histograms(ensembles=["GOE", "GUE", "GEO2"]):
     """Generate tau histogram figures (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING TAU HISTOGRAMS (THRESHOLD SENSITIVITY)")
@@ -145,14 +145,14 @@ def generate_tau_histograms(ensembles=["GOE", "GUE"]):
         )
 
         paths = viz.plot_tau_histograms(
-            data, ensemble=ensemble, output_dir=settings.FIG_SUMMARY_DIR
+            data, ensemble=ensemble, output_dir=settings.FIG_SPECTRAL_DIR
         )
 
         for path in paths:
             logger.info(f"  ✓ {path}")
 
 
-def generate_iteration_sweeps(ensembles=["GOE", "GUE"]):
+def generate_iteration_sweeps(ensembles=["GOE", "GUE", "GEO2"]):
     """Generate iteration sweep figures with 5 dimensions overlaid (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING ITERATION SWEEPS (MULTI-D)")
@@ -182,12 +182,12 @@ def generate_iteration_sweeps(ensembles=["GOE", "GUE"]):
             data_dict[(d, k)] = data
 
         path = viz.plot_iteration_sweep_multi_dk(
-            data_dict, ensemble=ensemble, tau=tau, output_dir=settings.FIG_SUMMARY_DIR
+            data_dict, ensemble=ensemble, tau=tau, output_dir=settings.FIG_SPECTRAL_DIR
         )
         logger.info(f"  ✓ {path}")
 
 
-def generate_landscapes(ensembles=["GOE", "GUE"]):
+def generate_landscapes(ensembles=["GOE", "GUE", "GEO2"]):
     """Generate landscape figures 2D+3D (4 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING LANDSCAPES")
@@ -206,18 +206,18 @@ def generate_landscapes(ensembles=["GOE", "GUE"]):
 
         # Generate 2D
         path_2d = viz.plot_landscape_S2D(
-            L1, L2, S, d=d, k=k, ensemble=ensemble, output_dir=settings.FIG_SUMMARY_DIR
+            L1, L2, S, d=d, k=k, ensemble=ensemble, output_dir=settings.FIG_SPECTRAL_DIR
         )
         logger.info(f"  ✓ {path_2d}")
 
         # Generate 3D
         path_3d = viz.plot_landscape_S3D(
-            L1, L2, S, d=d, k=k, ensemble=ensemble, output_dir=settings.FIG_SUMMARY_DIR
+            L1, L2, S, d=d, k=k, ensemble=ensemble, output_dir=settings.FIG_SPECTRAL_DIR
         )
         logger.info(f"  ✓ {path_3d}")
 
 
-def generate_overlap_hist_pdfs(ensembles=["GOE", "GUE"]):
+def generate_overlap_hist_pdfs(ensembles=["GOE", "GUE", "GEO2"]):
     """Generate overlap histogram PDFs (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING OVERLAP HISTOGRAM PDFs")
@@ -241,9 +241,94 @@ def generate_overlap_hist_pdfs(ensembles=["GOE", "GUE"]):
         )
 
         path = viz.plot_overlap_hist_pdf(
-            Sstar_by_d=data, ensemble=ensemble, bins=bins, output_dir=settings.FIG_SUMMARY_DIR
+            Sstar_by_d=data, ensemble=ensemble, bins=bins, output_dir=settings.FIG_SPECTRAL_DIR
         )
         logger.info(f"  ✓ {path}")
+
+
+def generate_comparison_plots(ensembles=["GOE", "GUE", "GEO2"]):
+    """
+    Generate 3-criteria comparison plots (12 files total).
+
+    Creates comparison plots with all dimensions overlaid for each ensemble:
+    - 4 plots per ensemble × 3 ensembles = 12 files
+    - Dimensions: GOE/GUE use [14,16,18,24], GEO2 uses [16,32,64]
+    - All 3 criteria (spectral, moment, krylov) overlaid on each plot
+    - Two x-axes: K/d² (density)
+    - Two y-axes: reachability and unreachability
+
+    Output files:
+      - {reachability,unreachability}_vs_k_over_d2_{ensemble}_tau0.95.png (6 files)
+      - TODO: K x-axis plots (6 files) - requires multi-d K-sweep infrastructure
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("GENERATING COMPARISON PLOTS (3 CRITERIA)")
+    logger.info("=" * 60)
+
+    # Dimensions per ensemble for Phase 3
+    dims_map = {
+        "GOE": [14, 16, 18, 24],
+        "GUE": [14, 16, 18, 24],
+        "GEO2": [16, 32, 64],
+    }
+
+    # Parameters
+    tau = 0.95  # Fixed tau for comparison plots
+    rho_max = 0.15  # Max density K/d²
+    rho_step = 0.01
+    trials_per_point = 50  # Reduced for faster testing (increase for production)
+
+    for ensemble in ensembles:
+        dims = dims_map[ensemble]
+        logger.info(f"\n{ensemble} ensemble (dims={dims})...")
+
+        # Run Monte Carlo for density sweep (K/d² x-axis)
+        # This computes all 3 criteria for all dimensions
+        logger.info(f"  Running Monte Carlo density sweep...")
+        logger.info(f"    ρ_max={rho_max}, step={rho_step}, τ={tau}")
+        logger.info(f"    Trials: {trials_per_point} per (d, ρ) point")
+
+        data = analysis.monte_carlo_unreachability_vs_density(
+            dims=dims,
+            rho_max=rho_max,
+            rho_step=rho_step,
+            taus=[tau],  # Single tau for comparison plots
+            ensemble=ensemble,
+            nks=trials_per_point // 3,
+            nst=3,
+            seed=settings.SEED,
+        )
+
+        # Generate K/d² plots (2 plots per ensemble)
+        logger.info(f"  Generating comparison plots (K/d² x-axis)...")
+
+        # Plot 1: Unreachability vs K/d²
+        paths = viz.plot_unreachability_three_criteria_vs_density(
+            data=data,
+            ensemble=ensemble,
+            outdir=settings.FIG_COMPARISON_DIR,
+            trials=trials_per_point,
+            y_axis="unreachable",
+        )
+        for path in paths:
+            logger.info(f"    ✓ {path}")
+
+        # Plot 2: Reachability vs K/d²
+        paths = viz.plot_unreachability_three_criteria_vs_density(
+            data=data,
+            ensemble=ensemble,
+            outdir=settings.FIG_COMPARISON_DIR,
+            trials=trials_per_point,
+            y_axis="reachable",
+        )
+        for path in paths:
+            logger.info(f"    ✓ {path}")
+
+        #  TODO: K x-axis plots (reachability_vs_k and unreachability_vs_k)
+        # These require a multi-dimension K-sweep function that doesn't exist yet.
+        # For now, these can be generated via CLI:
+        #   python -m reach.cli three-criteria-vs-K-multi-tau --ensemble {ensemble} ...
+        logger.info(f"  ⚠️  K x-axis plots not yet implemented (use CLI for now)")
 
 
 def print_summary():
@@ -253,7 +338,7 @@ def print_summary():
     logger.info("=" * 60)
 
 
-    fig_dir = Path(settings.FIG_SUMMARY_DIR)
+    fig_dir = Path(settings.FIG_SPECTRAL_DIR)
     if not fig_dir.exists():
         logger.warning(f"Directory {fig_dir} not found")
         return
@@ -280,7 +365,7 @@ def main():
     models.setup_environment(settings.SEED)
 
     logger.info("\n" + "=" * 60)
-    logger.info("REACH PACKAGE FIGURE GENERATION")
+    logger.info("REACH PACKAGE FIGURE GENERATION - PHASE 3")
     logger.info("=" * 60)
     logger.info("Configuration:")
     logger.info(f"  Rank dimensions: {settings.RANK_DIMS}")
@@ -289,11 +374,18 @@ def main():
     logger.info(f"  Threshold taus (5): {settings.TAUS_5}")
     logger.info(f"  Iteration sweep: {settings.ITER_SWEEP_ITERS}")
     logger.info(f"  Sampling: nks={settings.BIG_NKS}, nst={settings.BIG_NST}")
-    logger.info(f"  Output: {settings.FIG_SUMMARY_DIR}/")
+    logger.info(f"  Spectral output: {settings.FIG_SPECTRAL_DIR}/")
+    logger.info(f"  Comparison output: {settings.FIG_COMPARISON_DIR}/")
     logger.info("=" * 60)
 
     try:
-        # Generate all figure types
+        # Create output directories
+        Path(settings.FIG_SPECTRAL_DIR).mkdir(parents=True, exist_ok=True)
+        Path(settings.FIG_COMPARISON_DIR).mkdir(parents=True, exist_ok=True)
+        logger.info("✓ Output directories created")
+
+        # Generate spectral criterion plots (18 files: 6 per ensemble × 3 ensembles)
+        logger.info("\n[PHASE 3A: SPECTRAL CRITERION PLOTS]")
         generate_rank_comparisons_multi_tau()
         generate_optimizer_comparison()
         generate_tau_histograms()
@@ -301,11 +393,21 @@ def main():
         generate_overlap_hist_pdfs()
         generate_landscapes()
 
+        # Generate 3-criteria comparison plots (6 files: 2 per ensemble × 3 ensembles)
+        # NOTE: Only K/d² x-axis plots for now (K x-axis plots require additional infrastructure)
+        logger.info("\n[PHASE 3B: COMPARISON PLOTS]")
+        generate_comparison_plots()
+
         # Print summary table
         print_summary()
 
+        logger.info("\n" + "=" * 60)
+        logger.info("FIGURE GENERATION COMPLETE")
         logger.info("=" * 60)
-        logger.info("ALL FIGURES GENERATED SUCCESSFULLY")
+        logger.info(f"✓ Spectral plots: {settings.FIG_SPECTRAL_DIR}/")
+        logger.info(f"✓ Comparison plots: {settings.FIG_COMPARISON_DIR}/")
+        logger.info(f"  Total: ~24 files (18 spectral + 6 comparison)")
+        logger.info(f"  NOTE: K x-axis comparison plots require CLI generation")
         logger.info("=" * 60)
 
     except Exception as e:
