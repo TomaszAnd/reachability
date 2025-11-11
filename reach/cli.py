@@ -1426,8 +1426,6 @@ def cmd_three_criteria_vs_K_multi_tau(args) -> None:
 
 def cmd_plot_from_csv(args) -> None:
     """Execute plot-from-csv subcommand."""
-    from . import viz_csv
-
     logger.info(
         f"Plotting from CSV: {args.csv}, type={args.type}, "
         f"ensemble={args.ensemble}, y={args.y}"
@@ -1440,7 +1438,7 @@ def cmd_plot_from_csv(args) -> None:
 
     # Route to appropriate plotting function
     if args.type == "density":
-        filepaths = viz_csv.plot_density_from_csv(
+        filepaths = viz.plot_density_from_csv(
             csv_path=args.csv,
             ensemble=args.ensemble,
             y_axis=args.y,
@@ -1448,7 +1446,7 @@ def cmd_plot_from_csv(args) -> None:
             taus=taus,
         )
     elif args.type == "k-multi-tau":
-        filepaths = viz_csv.plot_k_multi_tau_from_csv(
+        filepaths = viz.plot_k_multi_tau_from_csv(
             csv_path=args.csv,
             ensemble=args.ensemble,
             y_type=args.y,
