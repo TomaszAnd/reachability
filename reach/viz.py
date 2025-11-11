@@ -986,24 +986,24 @@ def plot_iteration_sweep_multi_dk(
 
 
 def plot_rank_comparison(
-    old_results: Dict[Tuple[int, int], float],
-    new_results: Dict[Tuple[int, int], float],
+    moment_results: Dict[Tuple[int, int], float],
+    spectral_results: Dict[Tuple[int, int], float],
     dims: List[int],
     ensemble: str,
     tau: float,
     output_dir: Optional[str] = None,
 ) -> str:
     """
-    Plot old vs new criterion comparison with τ annotations.
+    Plot moment vs spectral criterion comparison with τ annotations.
 
-    Compares moment-based (old, τ-free) and spectral overlap (new, τ-based)
+    Compares moment-based (τ-free) and spectral overlap (τ-based)
     reachability criteria with proper display floor handling.
 
-    IMPORTANT: Old criterion is τ-free (definiteness check), new uses τ threshold.
+    IMPORTANT: Moment criterion is τ-free (definiteness check), spectral uses τ threshold.
 
     Args:
-        old_results: Dictionary mapping (d,k) → probability (old criterion, τ-free)
-        new_results: Dictionary mapping (d,k) → probability (new criterion, uses τ)
+        moment_results: Dictionary mapping (d,k) → probability (moment criterion, τ-free)
+        spectral_results: Dictionary mapping (d,k) → probability (spectral criterion, uses τ)
         dims: List of dimensions to plot
         ensemble: "GOE" or "GUE"
         tau: Threshold value used by new criterion
@@ -1016,42 +1016,42 @@ def plot_rank_comparison(
     ensure_dir(output_dir)
 
     # Log τ audit information
-    logger.info("[rank-compare] old_uses_tau=False")
-    logger.info(f"[rank-compare] new_tau={tau}")
+    logger.info("[rank-compare] moment_uses_tau=False")
+    logger.info(f"[rank-compare] spectral_tau={tau}")
 
     # Create single comparison figure
     fig, ax = plt.subplots(1, 1, figsize=(12, 8))
     colors = plt.cm.viridis(np.linspace(0, 1, len(dims)))
 
-    # Plot old and new criteria together
+    # Plot moment and spectral criteria together
     for idx, d in enumerate(dims):
-        # Old criterion (τ-free)
-        points_old = [(k, p) for (dim, k), p in old_results.items() if dim == d]
-        if points_old:
-            points_old.sort(key=lambda x: x[0])
-            ks, ps = zip(*points_old)
+        # Moment criterion (τ-free)
+        points_moment = [(k, p) for (dim, k), p in moment_results.items() if dim == d]
+        if points_moment:
+            points_moment.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_moment)
             apply_masked_connections(
                 ax,
                 np.array(ks),
                 np.array(ps),
                 color=colors[idx],
-                label=f"d={d} (old)",
+                label=f"d={d} (Moment)",
                 linewidth=2,
                 marker="o",
                 markersize=6,
             )
 
-        # New criterion (uses τ)
-        points_new = [(k, p) for (dim, k), p in new_results.items() if dim == d]
-        if points_new:
-            points_new.sort(key=lambda x: x[0])
-            ks, ps = zip(*points_new)
+        # Spectral criterion (uses τ)
+        points_spectral = [(k, p) for (dim, k), p in spectral_results.items() if dim == d]
+        if points_spectral:
+            points_spectral.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_spectral)
             apply_masked_connections(
                 ax,
                 np.array(ks),
                 np.array(ps),
                 color=colors[idx],
-                label=f"d={d} (new)",
+                label=f"d={d} (Spectral)",
                 linewidth=1.5,
                 marker="s",
                 markersize=5,
@@ -1060,11 +1060,11 @@ def plot_rank_comparison(
             )
 
     # Compute actual k range from data
-    ks_all = sorted({k for (_, k) in old_results.keys()} | {k for (_, k) in new_results.keys()})
+    ks_all = sorted({k for (_, k) in moment_results.keys()} | {k for (_, k) in spectral_results.keys()})
 
     ax.set_xlabel("k (Number of Hamiltonians)", fontsize=12)
     ax.set_ylabel("log(P(detected unreachability))", fontsize=12)
-    ax.set_title(f"Old vs New Criterion — {ensemble} (τ={tau:.2f})", fontsize=14)
+    ax.set_title(f"Moment vs Spectral Criterion — {ensemble} (τ={tau:.2f})", fontsize=14)
     ax.legend(ncol=3, fontsize=9, loc="upper right", framealpha=0.85)
     ax.grid(True, alpha=0.3)
 
@@ -1110,8 +1110,8 @@ def plot_rank_comparison(
 
 
 def plot_rank_comparison_with_inset(
-    old_results: Dict[Tuple[int, int], float],
-    new_results: Dict[Tuple[int, int], float],
+    moment_results: Dict[Tuple[int, int], float],
+    spectral_results: Dict[Tuple[int, int], float],
     dims: List[int],
     ensemble: str,
     tau: float,
@@ -1121,15 +1121,15 @@ def plot_rank_comparison_with_inset(
     zoom_ylim: Tuple[float, float] = (1e-8, 3e-2),
 ) -> str:
     """
-    Plot old vs new criterion comparison with zoomed inset.
+    Plot moment vs spectral criterion comparison with zoomed inset.
 
     Creates a main plot with full data range and adds a zoomed inset focusing on
     low-k, low-probability region. Includes a box indicator on the main plot showing
     the inset region.
 
     Args:
-        old_results: Dictionary mapping (d,k) → probability (old criterion, τ-free)
-        new_results: Dictionary mapping (d,k) → probability (new criterion, uses τ)
+        moment_results: Dictionary mapping (d,k) → probability (moment criterion, τ-free)
+        spectral_results: Dictionary mapping (d,k) → probability (spectral criterion, uses τ)
         dims: List of dimensions to plot
         ensemble: "GOE" or "GUE"
         tau: Threshold value used by new criterion
@@ -1228,11 +1228,11 @@ def plot_rank_comparison_with_inset(
 
     # Plot data on inset with same styling
     for idx, d in enumerate(dims):
-        # Old criterion
-        points_old = [(k, p) for (dim, k), p in old_results.items() if dim == d]
-        if points_old:
-            points_old.sort(key=lambda x: x[0])
-            ks, ps = zip(*points_old)
+        # Moment criterion
+        points_moment = [(k, p) for (dim, k), p in moment_results.items() if dim == d]
+        if points_moment:
+            points_moment.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_moment)
             apply_masked_connections(
                 axins,
                 np.array(ks),
@@ -1244,11 +1244,11 @@ def plot_rank_comparison_with_inset(
                 markersize=5,
             )
 
-        # New criterion
-        points_new = [(k, p) for (dim, k), p in new_results.items() if dim == d]
-        if points_new:
-            points_new.sort(key=lambda x: x[0])
-            ks, ps = zip(*points_new)
+        # Spectral criterion
+        points_spectral = [(k, p) for (dim, k), p in spectral_results.items() if dim == d]
+        if points_spectral:
+            points_spectral.sort(key=lambda x: x[0])
+            ks, ps = zip(*points_spectral)
             apply_masked_connections(
                 axins,
                 np.array(ks),
@@ -1637,8 +1637,8 @@ def plot_iter_sweep_multiD(
 
 
 def plot_rank_comparison_rescaled(
-    old_results: Dict[Tuple[int, int], float],
-    new_results: Dict[Tuple[int, int], float],
+    moment_results: Dict[Tuple[int, int], float],
+    spectral_results: Dict[Tuple[int, int], float],
     dims: List[int],
     ensemble: str,
     tau: float,
@@ -1648,14 +1648,14 @@ def plot_rank_comparison_rescaled(
     hide_floored: bool = True,
 ) -> str:
     """
-    Plot old vs new criterion comparison using log10(P) scale (no inset).
+    Plot moment vs spectral criterion comparison using log10(P) scale (no inset).
 
     Y-axis dynamically trimmed to data range. Legend placed at bottom to avoid
     occluding data.
 
     Args:
-        old_results: Dictionary mapping (d,k) → probability (old criterion, τ-free)
-        new_results: Dictionary mapping (d,k) → probability (new criterion, uses τ)
+        moment_results: Dictionary mapping (d,k) → probability (moment criterion, τ-free)
+        spectral_results: Dictionary mapping (d,k) → probability (spectral criterion, uses τ)
         dims: List of dimensions to plot
         ensemble: "GOE" or "GUE"
         tau: Threshold value used by new criterion

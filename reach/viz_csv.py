@@ -416,8 +416,8 @@ def _plot_k_multi_tau_single(
                 linestyle="none",
             )
 
-    # Plot old criterion
-    mask = df["criterion"] == "old"
+    # Plot moment criterion
+    mask = df["criterion"] == "moment"
     data = df[mask].sort_values("K")
     if not data.empty:
         K = data["K"].values
@@ -432,7 +432,7 @@ def _plot_k_multi_tau_single(
         ax.plot(
             K,
             p_masked,
-            label="Old criterion",
+            label="Moment criterion",
             color="purple",
             linestyle="--",
             linewidth=2,
