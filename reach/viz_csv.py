@@ -201,14 +201,14 @@ def _plot_density_single_tau(
     # Line styles for criteria
     styles = {
         "spectral": {"linestyle": "-", "marker": "o", "markersize": 6},
-        "old": {"linestyle": "--", "marker": "s", "markersize": 5},
+        "moment": {"linestyle": "--", "marker": "s", "markersize": 5},
         "krylov": {"linestyle": ":", "marker": "^", "markersize": 5},
     }
 
     floor = settings.DISPLAY_FLOOR
 
     # Plot each criterion and dimension
-    for criterion in ["spectral", "old", "krylov"]:
+    for criterion in ["spectral", "moment", "krylov"]:
         for d in dims:
             # Filter data
             if criterion == "spectral":
