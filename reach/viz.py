@@ -369,7 +369,7 @@ def plot_landscape_S3D(
     Plot spectral overlap landscape S(λ₁,λ₂) as 3D surface.
 
     Creates a 3D surface plot showing the spectral overlap function over
-    parameter space (λ₁, λ₂) with mathematical background:
+    parameter space (λ₁, λ₂):
     - Eigendecomposition: U(λ)†H(λ)U(λ) = diag(E₁,...,E_d)
     - Spectral overlap: S(λ) = Σₙ |φₙ(λ)*ψₙ(λ)|
 
