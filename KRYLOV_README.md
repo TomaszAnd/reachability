@@ -1,6 +1,6 @@
 ### Krylov Criterion (3-Curve Overlays)
 
-Compare Krylov rank criterion alongside spectral overlap and old criterion.
+Compare Krylov rank criterion alongside spectral overlap and moment criterion.
 
 **Rank sweep (fixed d=20, K=4; varying m):**
 ```bash
@@ -35,7 +35,7 @@ python -m reach.cli --seed 2 --summary three-criteria-vs-K --ensemble GOE -d 20 
 **Notes:**
 - **Krylov criterion**: Checks if target state φ lies in the Krylov subspace K_m(H, ψ) = span{ψ, Hψ, ..., H^(m-1)ψ} via projection-residual test (see below). Threshold-free (τ-independent).
 - **Spectral overlap**: Threshold-based test. Maximizes spectral overlap S(λ) over parameter space and checks if max S(λ) < τ.
-- **Old criterion**: Moment-based definiteness check. Uses second-moment matrix analysis. Threshold-free (τ-independent).
+- **Moment criterion**: Moment-based definiteness check. Uses second-moment matrix analysis. Threshold-free (τ-independent).
 
 ---
 

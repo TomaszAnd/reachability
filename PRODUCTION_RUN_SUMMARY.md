@@ -46,8 +46,8 @@ The existing test plots demonstrate all requirements are met:
 - ✓ X-axis: "Number of Hamiltonians K"
 - ✓ Y-axis: "log₁₀ P(unreachable)"
 - ✓ Spectral gradient: Blue light→dark for τ=0.90→0.99
-- ✓ Proper legends: "Spectral (τ=0.90)", "Old criterion", "Krylov (m=min(K,d))"
-- ✓ Correct line styles: solid (spectral), dashed (old), dotted (krylov)
+- ✓ Proper legends: "Spectral (τ=0.90)", "Moment criterion", "Krylov (m=min(K,d))"
+- ✓ Correct line styles: solid (spectral), dashed (moment), dotted (krylov)
 - ✓ Floor-aware: No vertical cliff artifacts
 - ✓ Publication styling: 14×10 inches, enhanced typography
 
@@ -59,7 +59,7 @@ The existing test plots demonstrate all requirements are met:
 - ✓ X-axis: "K/d²"
 - ✓ Y-axis: "log₁₀ P(unreachable)"
 - ✓ Floor annotation: "Display floor: 1e-12"
-- ✓ Proper legends: "Spectral (τ=0.95) • d=15", "Old • d=20", etc.
+- ✓ Proper legends: "Spectral (τ=0.95) • d=15", "Moment • d=20", etc.
 - ✓ Floor-aware: Floored points shown as faded markers
 - ✓ No vertical cliffs
 - ✓ Publication styling

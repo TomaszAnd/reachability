@@ -43,7 +43,7 @@ Total: 6/6 tests passed
 Each shows:
 - X-axis: K/d² (density from 0 to 0.15)
 - Y-axis: log₁₀ P(unreachable) or log₁₀ P(reachable)
-- All 3 criteria: Spectral (at that τ), Old, Krylov
+- All 3 criteria: Spectral (at that τ), Moment, Krylov
 - All 4 dimensions: d ∈ {20, 30, 40, 50}
 
 #### K-Sweep Plots (2 files)
@@ -54,7 +54,7 @@ Each shows:
 - X-axis: K (number of Hamiltonians, 2-14)
 - Y-axis: log₁₀ P(unreachable) or log₁₀ P(reachable)
 - Spectral at 3 τ values (blue gradient: light→dark)
-- Old criterion (dashed)
+- Moment criterion (dashed)
 - Krylov (dotted, m=min(K,d))
 
 #### CSV Files (2 files)
@@ -84,8 +84,8 @@ Each shows:
    - Grid with minor ticks
 
 4. **Correct Legends**:
-   - Density: "Spectral (τ=0.95) • d=30", "Old • d=40", "Krylov (m=min(K,d)) • d=50"
-   - K-sweep: "Spectral (τ=0.90)", "Old criterion", "Krylov (m=min(K,d))"
+   - Density: "Spectral (τ=0.95) • d=30", "Moment • d=40", "Krylov (m=min(K,d)) • d=50"
+   - K-sweep: "Spectral (τ=0.90)", "Moment criterion", "Krylov (m=min(K,d))"
 
 5. **CSV Logging**: All 15 fields, appends to existing files
 

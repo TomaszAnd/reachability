@@ -9,7 +9,7 @@
 
 ### What It Does
 
-- **Compares 3 reachability criteria**: Spectral overlap (τ-based), old criterion (moment-based), and Krylov subspace
+- **Compares 3 reachability criteria**: Spectral overlap (τ-based), moment criterion (moment-based), and Krylov subspace
 - **Runs density sweeps**: Analyze P(unreachability) vs control density ρ = K/d² across dimensions {20, 30, 40, 50}
 - **Runs K-sweeps**: Analyze P(unreachability) vs number of Hamiltonians K at fixed dimension
 - **Generates publication-ready plots**: Floor-aware rendering, Wilson error bars, 14×10" @ 200 DPI
@@ -205,7 +205,7 @@ We estimate `P(unreachability)` via Monte Carlo over random ensembles.
 ### Three Criteria Compared
 
 1. **Spectral** (NEW): τ-based threshold on maximum overlap
-2. **Old** (τ-free): Moment-based definiteness check (classical)
+2. **Moment** (τ-free): Moment-based definiteness check (classical)
 3. **Krylov**: Projection-residual test on Krylov subspace
 
 For full mathematical details, see:
