@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE", "GEO2"]):
+def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE"]):
     """
     Generate rank comparison plots for multiple tau values (6 files total).
 
@@ -82,7 +82,7 @@ def generate_rank_comparisons_multi_tau(ensembles=["GOE", "GUE", "GEO2"]):
             logger.info(f"  ✓ {path}")
 
 
-def generate_optimizer_comparison(ensembles=["GOE", "GUE", "GEO2"]):
+def generate_optimizer_comparison(ensembles=["GOE", "GUE"]):
     """Generate optimizer comparison figures (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING OPTIMIZER COMPARISON")
@@ -121,7 +121,7 @@ def generate_optimizer_comparison(ensembles=["GOE", "GUE", "GEO2"]):
         logger.info(f"  ✓ {path}")
 
 
-def generate_tau_histograms(ensembles=["GOE", "GUE", "GEO2"]):
+def generate_tau_histograms(ensembles=["GOE", "GUE"]):
     """Generate tau histogram figures (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING TAU HISTOGRAMS (THRESHOLD SENSITIVITY)")
@@ -152,7 +152,7 @@ def generate_tau_histograms(ensembles=["GOE", "GUE", "GEO2"]):
             logger.info(f"  ✓ {path}")
 
 
-def generate_iteration_sweeps(ensembles=["GOE", "GUE", "GEO2"]):
+def generate_iteration_sweeps(ensembles=["GOE", "GUE"]):
     """Generate iteration sweep figures with 5 dimensions overlaid (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING ITERATION SWEEPS (MULTI-D)")
@@ -187,7 +187,7 @@ def generate_iteration_sweeps(ensembles=["GOE", "GUE", "GEO2"]):
         logger.info(f"  ✓ {path}")
 
 
-def generate_landscapes(ensembles=["GOE", "GUE", "GEO2"]):
+def generate_landscapes(ensembles=["GOE", "GUE"]):
     """Generate landscape figures 2D+3D (4 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING LANDSCAPES")
@@ -217,7 +217,7 @@ def generate_landscapes(ensembles=["GOE", "GUE", "GEO2"]):
         logger.info(f"  ✓ {path_3d}")
 
 
-def generate_overlap_hist_pdfs(ensembles=["GOE", "GUE", "GEO2"]):
+def generate_overlap_hist_pdfs(ensembles=["GOE", "GUE"]):
     """Generate overlap histogram PDFs (2 files)."""
     logger.info("\n" + "=" * 60)
     logger.info("GENERATING OVERLAP HISTOGRAM PDFs")
@@ -246,12 +246,12 @@ def generate_overlap_hist_pdfs(ensembles=["GOE", "GUE", "GEO2"]):
         logger.info(f"  ✓ {path}")
 
 
-def generate_comparison_plots(ensembles=["GOE", "GUE", "GEO2"]):
+def generate_comparison_plots(ensembles=["GOE", "GUE"]):
     """
-    Generate 3-criteria comparison plots (12 files total).
+    Generate 3-criteria comparison plots (4 files total).
 
     Creates comparison plots with all dimensions overlaid for each ensemble:
-    - 4 plots per ensemble × 3 ensembles = 12 files
+    - 2 plots per ensemble × 2 ensembles = 4 files
     - Dimensions: GOE/GUE use [14,16,18,24], GEO2 uses [16,32,64]
     - All 3 criteria (spectral, moment, krylov) overlaid on each plot
     - Two x-axes: K/d² (density)
@@ -384,7 +384,7 @@ def main():
         Path(settings.FIG_COMPARISON_DIR).mkdir(parents=True, exist_ok=True)
         logger.info("✓ Output directories created")
 
-        # Generate spectral criterion plots (18 files: 6 per ensemble × 3 ensembles)
+        # Generate spectral criterion plots (12 files: 6 per ensemble × 2 ensembles)
         logger.info("\n[PHASE 3A: SPECTRAL CRITERION PLOTS]")
         generate_rank_comparisons_multi_tau()
         generate_optimizer_comparison()
@@ -393,8 +393,9 @@ def main():
         generate_overlap_hist_pdfs()
         generate_landscapes()
 
-        # Generate 3-criteria comparison plots (6 files: 2 per ensemble × 3 ensembles)
+        # Generate 3-criteria comparison plots (4 files: 2 per ensemble × 2 ensembles)
         # NOTE: Only K/d² x-axis plots for now (K x-axis plots require additional infrastructure)
+        # NOTE: GEO2 skipped - moment criterion doesn't support GEO2 yet
         logger.info("\n[PHASE 3B: COMPARISON PLOTS]")
         generate_comparison_plots()
 
@@ -406,7 +407,8 @@ def main():
         logger.info("=" * 60)
         logger.info(f"✓ Spectral plots: {settings.FIG_SPECTRAL_DIR}/")
         logger.info(f"✓ Comparison plots: {settings.FIG_COMPARISON_DIR}/")
-        logger.info(f"  Total: ~24 files (18 spectral + 6 comparison)")
+        logger.info(f"  Total: ~16 files (12 spectral + 4 comparison) for GOE & GUE")
+        logger.info(f"  NOTE: GEO2 skipped (moment criterion not yet implemented)")
         logger.info(f"  NOTE: K x-axis comparison plots require CLI generation")
         logger.info("=" * 60)
 
