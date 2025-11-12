@@ -49,16 +49,16 @@ EXTRAS_REQUIRE["all"] = sum(EXTRAS_REQUIRE.values(), [])
 setup(
     name="reach",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Tomasz Andrzejewski",
+    author_email="tomasz.andrzejewski@example.com",
     description="Time-free quantum reachability analysis",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/reachability",
+    url="https://github.com/TomaszAnd/reachability",
     project_urls={
-        "Bug Reports": "https://github.com/yourusername/reachability/issues",
-        "Source": "https://github.com/yourusername/reachability",
-        "Documentation": "https://github.com/yourusername/reachability#readme",
+        "Bug Reports": "https://github.com/TomaszAnd/reachability/issues",
+        "Source": "https://github.com/TomaszAnd/reachability",
+        "Documentation": "https://github.com/TomaszAnd/reachability#readme",
     },
     packages=find_packages(exclude=["tests", "tests.*", "scripts", "archive_*"]),
     classifiers=[

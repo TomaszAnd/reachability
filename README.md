@@ -38,7 +38,7 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/reachability.git
+git clone https://github.com/TomaszAnd/reachability.git
 cd reachability
 
 # Create virtual environment (recommended)

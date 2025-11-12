@@ -8,13 +8,11 @@ abstract: >-
   the reachable subspace of a parameterized Hamiltonian family using spectral overlap,
   moment-based, and Krylov subspace criteria.
 authors:
-  - family-names: "Your Last Name"
-    given-names: "Your First Name"
-    email: your.email@example.com
-    affiliation: "Your Institution"
-    orcid: "https://orcid.org/0000-0000-0000-0000"  # Optional: Add your ORCID
-repository-code: "https://github.com/yourusername/reachability"
-url: "https://github.com/yourusername/reachability"
+  - family-names: "Andrzejewski"
+    given-names: "Tomasz"
+    email: tomasz.andrzejewski@example.com
+repository-code: "https://github.com/TomaszAnd/reachability"
+url: "https://github.com/TomaszAnd/reachability"
 version: 0.1.0
 date-released: 2025-10-22
 license: MIT
@@ -39,9 +37,9 @@ preferred-citation:
   type: software
   title: "reach: Time-Free Quantum Reachability Analysis"
   authors:
-    - family-names: "Your Last Name"
-      given-names: "Your First Name"
-      email: your.email@example.com
+    - family-names: "Andrzejewski"
+      given-names: "Tomasz"
+      email: tomasz.andrzejewski@example.com
   year: 2025
-  url: "https://github.com/yourusername/reachability"
+  url: "https://github.com/TomaszAnd/reachability"
   version: 0.1.0
