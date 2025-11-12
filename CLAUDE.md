@@ -307,21 +307,15 @@ k30_gue.csv          # K-sweep data (d=30, multiple tau)
 | `reach/optimize.py` | Maximization of S(λ) using scipy.optimize |
 | `reach/settings.py` | All configuration constants, defaults, hyperparameters |
 | `scripts/plot_refresh.sh` | Helper to re-render plots from CSV |
+| `scripts/generate_summary_figs.py` | Generate all publication-quality plots |
 | `run_production_sweeps.sh` | Full production run (2-3 hours, trials=150/300) |
 | `run_production_sweeps_FAST.sh` | Fast demo (5-10 min, reduced parameters) |
-| `validate_implementation.py` | Validation tests for production requirements |
-| `validate_streaming_mode.py` | Validation tests for plot-from-csv functionality |
 
 ---
 
-## Production Documentation Links
+## Production Documentation
 
-For detailed production workflows, see:
-
-- **[README_PRODUCTION.md](README_PRODUCTION.md)** - Quick start for production runs
-- **[PRODUCTION_RUN_GUIDE.md](PRODUCTION_RUN_GUIDE.md)** - Detailed runtime info, parameters, monitoring
-- **[PRODUCTION_RUN_SUMMARY.md](PRODUCTION_RUN_SUMMARY.md)** - Comprehensive status, expected outputs
-- **[IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)** - Implementation details, validation results
+All production workflows, mathematical foundations, and usage examples are now consolidated in **[README.md](README.md)**.
 
 ---
 

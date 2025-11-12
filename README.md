@@ -1,7 +1,5 @@
 # reach: Time-Free Quantum Reachability Analysis
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 ## Overview
 
@@ -12,9 +10,6 @@
 - **Compares 3 reachability criteria**: Spectral overlap (τ-based), moment criterion (moment-based), and Krylov subspace
 - **Runs density sweeps**: Analyze P(unreachability) vs control density ρ = K/d² across dimensions {20, 30, 40, 50}
 - **Runs K-sweeps**: Analyze P(unreachability) vs number of Hamiltonians K at fixed dimension
-- **Generates publication-ready plots**: Floor-aware rendering, Wilson error bars, 14×10" @ 200 DPI
-- **Streams results**: Incremental CSV logging with `--flush-every` for resumable runs
-- **Plots from CSV**: `plot-from-csv` command for mid-run progress visualization
 
 ### Key Features
 
@@ -52,7 +47,7 @@ python -m reach.cli three-criteria-vs-density \
   --taus 0.95 --trials 25 \
   --y unreachable
 
-# Output: fig_summary/three_criteria_vs_density_GUE_tau0.95_unreachable.png
+# Output: fig/comparison/three_criteria_vs_density_GUE_tau0.95_unreachable.png
 ```
 
 #### GEO2 Example (Geometric Lattice Ensemble)
@@ -77,7 +72,7 @@ If you have CSV data from a previous run:
 ```bash
 # Generate plots from CSV (instant)
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable
@@ -86,12 +81,6 @@ python -m reach.cli plot-from-csv \
 ---
 
 ## Production Runs
-
-For full publication-quality sweeps, see detailed guides:
-
-- **[README_PRODUCTION.md](README_PRODUCTION.md)** - Quick start for production runs
-- **[PRODUCTION_RUN_GUIDE.md](PRODUCTION_RUN_GUIDE.md)** - Runtime estimates, parameters, monitoring
-- **[PRODUCTION_RUN_SUMMARY.md](PRODUCTION_RUN_SUMMARY.md)** - Expected outputs, validation steps
 
 ### Fast Demo (~5-10 minutes)
 
@@ -130,7 +119,7 @@ python -m reach.cli three-criteria-vs-density \
   --ensemble GUE --dims 20,30,40,50 \
   --rho-max 0.15 --rho-step 0.01 \
   --taus 0.90,0.95,0.99 --trials 150 \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --flush-every 10  \  # <-- Flush every 10 data points
   --y unreachable
 ```
@@ -147,14 +136,14 @@ Read existing CSV and generate plots (useful for partial results):
 ```bash
 # Density plots
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable
 
 # K-sweep plots
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --type k-multi-tau \
   --ensemble GUE \
   --y unreachable
@@ -208,9 +197,7 @@ We estimate `P(unreachability)` via Monte Carlo over random ensembles.
 2. **Moment** (τ-free): Moment-based definiteness check (classical)
 3. **Krylov**: Projection-residual test on Krylov subspace
 
-For full mathematical details, see:
-- [KRYLOV_README.md](KRYLOV_README.md) - Krylov criterion, projection-residual test
-- [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) - Floor-aware plotting details
+See detailed mathematical descriptions below.
 
 ---
 
@@ -237,10 +224,9 @@ For full mathematical details, see:
 | `run_production_sweeps.sh` | Full production run (2-3 hrs, trials=150/300) |
 | `run_production_sweeps_FAST.sh` | Fast demo (5-10 min, reduced params) |
 | `scripts/plot_refresh.sh` | Re-render plots from existing CSVs |
-| `validate_implementation.py` | Validation tests for production requirements |
-| `validate_streaming_mode.py` | Validation tests for plot-from-csv |
+| `scripts/generate_summary_figs.py` | Generate all publication-quality plots |
 
-### Output (`fig_summary/`)
+### Output (`fig/comparison/`)
 
 **Density plots** (6 files):
 ```
@@ -277,7 +263,7 @@ analysis.py (collect results)
        ↓
 viz.py / viz_csv.py (render figures)
        ↓
-fig_summary/*.png + *.csv
+fig/comparison/*.png + *.csv
 ```
 
 ---
@@ -295,7 +281,7 @@ python -m reach.cli three-criteria-vs-density \
   --rho-step 0.01 \
   --taus 0.90,0.95,0.99 \
   --trials 150 \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --flush-every 10 \
   --y unreachable
 ```
@@ -312,7 +298,7 @@ python -m reach.cli three-criteria-vs-K-multi-tau \
   --k-max 14 \
   --taus 0.90,0.95,0.99 \
   --trials 300 \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --flush-every 10 \
   --y unreachable
 ```
@@ -324,21 +310,21 @@ python -m reach.cli three-criteria-vs-K-multi-tau \
 ```bash
 # Density plots from CSV
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable
 
 # K-sweep plots from CSV
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/k30_gue.csv \
+  --csv fig/comparison/k30_gue.csv \
   --type k-multi-tau \
   --ensemble GUE \
   --y reachable
 
 # Filter to specific tau values
 python -m reach.cli plot-from-csv \
-  --csv fig_summary/density_gue.csv \
+  --csv fig/comparison/density_gue.csv \
   --type density \
   --ensemble GUE \
   --y unreachable \
@@ -381,59 +367,6 @@ python validate_streaming_mode.py
 
 ---
 
-## Contributing (AI Assistants)
-
-For detailed workflows, conventions, and checklists for AI coding assistants, see:
-
-**[CLAUDE.md](CLAUDE.md)** - Complete guide for Claude Code Chat and other AI assistants
-
-Key points:
-- Small, atomic PRs
-- Incremental edits (prefer `Edit` over full rewrites)
-- Run validation after changes
-- Update docs alongside code
-- Use streaming CSV for long runs
-- Reference production docs for detailed workflows
-
----
-
-## Documentation
-
-| Doc | Purpose |
-|-----|---------|
-| [README.md](README.md) | This file - overview and quick start |
-| [CLAUDE.md](CLAUDE.md) | AI assistant workflows and conventions |
-| [README_PRODUCTION.md](README_PRODUCTION.md) | Quick start for production runs |
-| [PRODUCTION_RUN_GUIDE.md](PRODUCTION_RUN_GUIDE.md) | Runtime estimates, monitoring, troubleshooting |
-| [PRODUCTION_RUN_SUMMARY.md](PRODUCTION_RUN_SUMMARY.md) | Expected outputs, validation steps |
-| [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) | Implementation details, validation results |
-| [KRYLOV_README.md](KRYLOV_README.md) | Krylov criterion mathematical details |
-| [CHANGELOG.md](CHANGELOG.md) | Version history |
-
----
-
-## Citation
-
-If you use this code, please cite:
-
-```bibtex
-@software{reach2025,
-  title = {reach: Time-Free Quantum Reachability Analysis},
-  author = {Your Name},
-  year = {2025},
-  url = {https://github.com/yourusername/reachability}
-}
-```
-
-See [CITATION.cff](CITATION.cff) for full metadata.
-
----
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
----
 
 ## Quick Reference Card
 
@@ -451,11 +384,7 @@ tail -f production.log
 ./scripts/plot_refresh.sh
 
 # Plot from CSV (manual)
-python -m reach.cli plot-from-csv --csv fig_summary/density_gue.csv --type density --ensemble GUE --y unreachable
-
-# Validation
-python validate_implementation.py
-python validate_streaming_mode.py
+python -m reach.cli plot-from-csv --csv fig/comparison/density_gue.csv --type density --ensemble GUE --y unreachable
 
 # Help
 python -m reach.cli --help

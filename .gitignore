@@ -1,10 +1,54 @@
+# Archive directories (moved from main repo)
+archive_docs/
+archive_scripts/
+
+# Generated plots (large files - regenerate as needed)
+fig/**/*.png
+fig/**/*.pdf
+
+# Logs
+*.log
+generation*.log
+production.log
+nohup.out
+
+# Python
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-.venv/
-.env/
-build/
-dist/
+*.pyc
+*.pyo
+*.pyd
 *.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+.directory
+
+# Data files (CSVs can get large)
+# Uncomment if needed:
+# fig/**/*.csv
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Environment
+.env
+venv/
+env/
+ENV/
