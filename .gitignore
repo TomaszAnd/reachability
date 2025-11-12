@@ -2,9 +2,9 @@
 archive_docs/
 archive_scripts/
 
-# Generated plots (large files - regenerate as needed)
-fig/**/*.png
-fig/**/*.pdf
+# Generated plots - included in repository for easy viewing
+# fig/**/*.png
+# fig/**/*.pdf
 
 # Logs
 *.log
