@@ -1,27 +1,47 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
-title: "reach: Time-Free Quantum Reachability Analysis"
-version: 0.1.0
-date-released: 2025-01-03
-url: "https://github.com/TomaszAnd/reach"
-repository-code: "https://github.com/TomaszAnd/reach"
+message: "If you use this software in your research, please cite it as below."
 type: software
-license: MIT
+title: "reach: Time-Free Quantum Reachability Analysis"
+abstract: >-
+  A Python package for analyzing quantum state reachability using time-free criteria.
+  Instead of explicit time evolution, we determine whether a target state lies within
+  the reachable subspace of a parameterized Hamiltonian family using spectral overlap,
+  moment-based, and Krylov subspace criteria.
 authors:
-  - family-names: "<Author Last Name>"
-    given-names: "<Author First Name>"
-    email: "TomaszAnd@users.noreply.github.com"
+  - family-names: "Your Last Name"
+    given-names: "Your First Name"
+    email: your.email@example.com
+    affiliation: "Your Institution"
+    orcid: "https://orcid.org/0000-0000-0000-0000"  # Optional: Add your ORCID
+repository-code: "https://github.com/yourusername/reachability"
+url: "https://github.com/yourusername/reachability"
+version: 0.1.0
+date-released: 2025-10-22
+license: MIT
 keywords:
-  - quantum computing
+  - quantum control
   - reachability analysis
   - random matrix theory
-  - spectral overlap
-  - time-free dynamics
-abstract: >
-  reach is a Python package for analyzing quantum state reachability
-  using time-free spectral overlap criteria. Instead of asking whether
-  one can reach a target state at a specific time, the analysis determines
-  whether a target state lies within the reachable subspace spanned by a
-  parameterized Hamiltonian family. The package provides Monte Carlo
-  analysis over random matrix ensembles (GOE/GUE) with full reproducibility
-  and publication-quality visualization tools.
+  - Hamiltonian systems
+  - spectral methods
+  - quantum information
+references:
+  - type: article
+    title: "Geometric Two-Local Hamiltonians"
+    authors:
+      - family-names: "Author"
+        given-names: "Name"
+    journal: "arXiv"
+    year: 2024
+    url: "https://arxiv.org/abs/2510.06321"
+    notes: "GEO2 ensemble definition"
+preferred-citation:
+  type: software
+  title: "reach: Time-Free Quantum Reachability Analysis"
+  authors:
+    - family-names: "Your Last Name"
+      given-names: "Your First Name"
+      email: your.email@example.com
+  year: 2025
+  url: "https://github.com/yourusername/reachability"
+  version: 0.1.0
