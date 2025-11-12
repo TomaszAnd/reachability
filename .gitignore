@@ -1,7 +1,3 @@
-# Archive directories (moved from main repo)
-archive_docs/
-archive_scripts/
-
 # Generated plots - included in repository for easy viewing
 # fig/**/*.png
 # fig/**/*.pdf
