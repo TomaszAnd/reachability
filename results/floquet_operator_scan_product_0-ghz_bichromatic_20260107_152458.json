@@ -1,0 +1,52 @@
+{
+  "initial_name": "product_0",
+  "target_name": "ghz",
+  "classical_overlap": 0.4999999999999999,
+  "K_values": [
+    12,
+    16
+  ],
+  "driving_type": "bichromatic",
+  "n_trials": 3,
+  "t_max": 50.0,
+  "period": 1.0,
+  "n_qubits": 4,
+  "fidelity_static": [
+    0.8805294087284304,
+    0.9457762408088923
+  ],
+  "fidelity_floquet_o1": [
+    0.6814847065956368,
+    0.49999999999999983
+  ],
+  "fidelity_floquet_o2": [
+    0.5511949308376227,
+    0.49999999999999983
+  ],
+  "std_static": [
+    0.03092440665970623,
+    0.010033388748805069
+  ],
+  "std_floquet_o1": [
+    0.11591723129490727,
+    5.551115123125783e-17
+  ],
+  "std_floquet_o2": [
+    0.0724005655153188,
+    5.551115123125783e-17
+  ],
+  "time_static": [
+    13.521495653626394,
+    38.55313238336848
+  ],
+  "time_floquet_o1": [
+    20.367058164785526,
+    0.0
+  ],
+  "time_floquet_o2": [
+    3.9889727330006175,
+    0.0
+  ],
+  "timestamp": "2026-01-07T15:24:58.622950",
+  "script": "run_floquet_operator_scan.py"
+}

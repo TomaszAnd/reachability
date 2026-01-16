@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it as below."
+type: software
+title: "reach: Time-Free Quantum Reachability Analysis"
+abstract: >-
+  A Python package for analyzing quantum state reachability using time-free criteria.
+  Instead of explicit time evolution, we determine whether a target state lies within
+  the reachable subspace of a parameterized Hamiltonian family using spectral overlap,
+  moment-based, and Krylov subspace criteria.
+authors:
+  - family-names: "Andrzejewski"
+    given-names: "Tomasz"
+    email: tomasz.andrzejewski@example.com
+repository-code: "https://github.com/TomaszAnd/reachability"
+url: "https://github.com/TomaszAnd/reachability"
+version: 0.1.0
+date-released: 2025-10-22
+license: MIT
+keywords:
+  - quantum control
+  - reachability analysis
+  - random matrix theory
+  - Hamiltonian systems
+  - spectral methods
+  - quantum information
+references:
+  - type: article
+    title: "Geometric Two-Local Hamiltonians"
+    authors:
+      - family-names: "Author"
+        given-names: "Name"
+    journal: "arXiv"
+    year: 2024
+    url: "https://arxiv.org/abs/2510.06321"
+    notes: "GEO2 ensemble definition"
+preferred-citation:
+  type: software
+  title: "reach: Time-Free Quantum Reachability Analysis"
+  authors:
+    - family-names: "Andrzejewski"
+      given-names: "Tomasz"
+      email: tomasz.andrzejewski@example.com
+  year: 2025
+  url: "https://github.com/TomaszAnd/reachability"
+  version: 0.1.0
