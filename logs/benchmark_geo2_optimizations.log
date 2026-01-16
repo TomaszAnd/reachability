@@ -1,0 +1,56 @@
+======================================================================
+GEO2 AGGRESSIVE OPTIMIZATION BENCHMARK
+======================================================================
+Start: 2025-12-29 15:46:49
+
+New settings: GEO2_MAXITER=20, GEO2_FTOL=1e-4
+Previous: GEO2_MAXITER=50, ftol=1e-8
+Expected speedup: ~3-4x
+
+
+Testing d16_fixed... 0.6s (14.0ms/trial)
+
+Testing d16_optimized... 4.2s (104.9ms/trial)
+
+Testing d32_fixed... 2.2s (54.6ms/trial)
+
+Testing d32_optimized... 13.3s (331.5ms/trial)
+
+======================================================================
+RESULTS ANALYSIS
+======================================================================
+
+d=16:
+  Fixed:     14.0 ms/trial
+  Optimized: 104.9 ms/trial
+  Ratio:     7.5x
+  Target:    <50 ms/trial, <20x ratio
+  Status:    ✗ FAIL
+
+d=32:
+  Fixed:     54.6 ms/trial
+  Optimized: 331.5 ms/trial
+  Ratio:     6.1x
+  Target:    <300 ms/trial, <20x ratio
+  Status:    ✗ FAIL
+
+======================================================================
+COMPARISON WITH PREVIOUS SETTINGS
+======================================================================
+
+Previous results (maxiter=50, ftol=1e-8):
+  d16: 242.59 ms/trial, ratio 51.3x
+  d32: 1471.93 ms/trial, ratio 46.3x
+
+New results (maxiter=20, ftol=1e-4):
+  d16: 104.9 ms/trial, ratio 7.5x
+  d32: 331.5 ms/trial, ratio 6.1x
+
+Speedup achieved:
+  d16: 2.31x faster
+  d32: 4.44x faster
+
+======================================================================
+⚠ TARGETS NOT MET
+  Next step: Implement hybrid sampling approach
+======================================================================

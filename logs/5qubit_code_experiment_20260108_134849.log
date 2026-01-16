@@ -1,0 +1,120 @@
+/Users/tomas/PycharmProjects/reachability/reachability/scripts/run_5qubit_code_experiment.py:92: DeprecationWarning: `kron` has been deprecated in favour of `numpy.kron` in SciPy 1.15.0 and will be removed in SciPy 1.17.0.
+  result = kron(result, p)
+======================================================================
+5-QUBIT PERFECT CODE REACHABILITY EXPERIMENT
+======================================================================
+
+Testing criteria on |00000⟩ → |0_L⟩ preparation
+λ search trials (Floquet): 100
+Random seed: 42
+
+Creating |0_L⟩ state...
+
+Verifying stabilizer eigenvalues:
+  ✓ XZZXI: eigenvalue = 1.0000000000
+  ✓ IXZZX: eigenvalue = 1.0000000000
+  ✓ XIXZZ: eigenvalue = 1.0000000000
+  ✓ ZXIXZ: eigenvalue = 1.0000000000
+✓ All stabilizers verified
+
+Overlap |⟨00000|0_L⟩|² = 0.062500
+
+Generating GEO2LOCAL Hamiltonians (5-qubit chain)...
+Generated 51 2-local operators
+
+======================================================================
+TESTING CRITERIA AT VARIOUS K
+======================================================================
+
+  K | Static     | Floquet    | Comment
+-----|------------|------------|-----------------------------------
+
+[K=2] Testing static criterion... done
+[K=2] Testing Floquet criterion (O(2), 100 λ trials)... done
+   2 | ✗ inconc   | ✗ inconc   | 
+
+[K=4] Testing static criterion... done
+[K=4] Testing Floquet criterion (O(2), 100 λ trials)... done
+   4 | ✗ inconc   | ✓ UNREACH  | ← Floquet succeeds, static fails!
+
+[K=6] Testing static criterion... done
+[K=6] Testing Floquet criterion (O(2), 100 λ trials)... done
+   6 | ✗ inconc   | ✗ inconc   | 
+
+[K=8] Testing static criterion... done
+[K=8] Testing Floquet criterion (O(2), 100 λ trials)... done
+   8 | ✗ inconc   | ✗ inconc   | 
+
+[K=10] Testing static criterion... done
+[K=10] Testing Floquet criterion (O(2), 100 λ trials)... done
+  10 | ✗ inconc   | ✗ inconc   | 
+
+[K=12] Testing static criterion... done
+[K=12] Testing Floquet criterion (O(2), 100 λ trials)... done
+  12 | ✗ inconc   | ✗ inconc   | 
+
+[K=14] Testing static criterion... done
+[K=14] Testing Floquet criterion (O(2), 100 λ trials)... done
+  14 | ✗ inconc   | ✗ inconc   | 
+
+[K=16] Testing static criterion... done
+[K=16] Testing Floquet criterion (O(2), 100 λ trials)... done
+  16 | ✗ inconc   | ✗ inconc   | 
+
+[K=18] Testing static criterion... done
+[K=18] Testing Floquet criterion (O(2), 100 λ trials)... done
+  18 | ✗ inconc   | ✗ inconc   | 
+
+[K=20] Testing static criterion... done
+[K=20] Testing Floquet criterion (O(2), 100 λ trials)... done
+  20 | ✗ inconc   | ✗ inconc   | 
+
+[K=22] Testing static criterion... done
+[K=22] Testing Floquet criterion (O(2), 100 λ trials)... done
+  22 | ✗ inconc   | ✗ inconc   | 
+
+[K=24] Testing static criterion... done
+[K=24] Testing Floquet criterion (O(2), 100 λ trials)... done
+  24 | ✗ inconc   | ✗ inconc   | 
+
+[K=26] Testing static criterion... done
+[K=26] Testing Floquet criterion (O(2), 100 λ trials)... done
+  26 | ✗ inconc   | ✗ inconc   | 
+
+[K=28] Testing static criterion... done
+[K=28] Testing Floquet criterion (O(2), 100 λ trials)... done
+  28 | ✗ inconc   | ✗ inconc   | 
+
+[K=30] Testing static criterion... done
+[K=30] Testing Floquet criterion (O(2), 100 λ trials)... done
+  30 | ✗ inconc   | ✗ inconc   | 
+
+======================================================================
+CRITICAL K VALUES
+======================================================================
+
+Static criterion:  K_c = None (never proved unreachable)
+
+Floquet criterion: K_c = 4
+  → Proves unreachable with 4 operators or fewer
+
+✓ Floquet SUCCEEDS where static FAILS completely
+
+======================================================================
+INTERPRETATION
+======================================================================
+
+K_c (critical K) interpretation:
+  → |0_L⟩ is provably UNREACHABLE with K < K_c operators
+  → This provides a lower bound on resources needed for code preparation
+
+Results require further analysis
+
+======================================================================
+RESULTS SAVED
+======================================================================
+
+File: results/5qubit_code_experiment_20260108_145257.pkl
+
+Summary: results/5qubit_code_experiment_20260108_145257_summary.json
+

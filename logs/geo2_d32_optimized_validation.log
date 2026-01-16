@@ -1,0 +1,21 @@
+======================================================================
+GEO2 D=32 VALIDATION: OPTIMIZED λ (REDUCED TRIALS)
+======================================================================
+Timestamp: 20251226_184319
+Output: data/raw_logs/geo2_d32_optimized_validation_20251226_184319.pkl
+
+Configuration:
+  - Dimension: d=32 (1×5 lattice)
+  - optimize_lambda: TRUE
+  - Trials: nks=30, nst=20 (600 total vs 9600 in stuck run)
+  - Tau: 0.99
+  - Expected runtime: ~20-30 minutes
+======================================================================
+
+
+======================================================================
+✓ COMPLETED
+Runtime: 7833.3 minutes
+Results saved to: data/raw_logs/geo2_d32_optimized_validation_20251226_184319.pkl
+Keys: ['dims', 'taus', 'rho_grid', (32, 0.99, 'spectral'), (32, 0.99, 'moment'), (32, 0.99, 'krylov')]
+======================================================================

@@ -1,0 +1,57 @@
+2026-01-05 18:16:45,149 - __main__ - INFO - Starting GEO2 Floquet Engineering Experiment
+2026-01-05 18:16:45,149 - __main__ - INFO - Configuration: {'dims': [16], 'rho_max': 0.1, 'rho_step': 0.02, 'n_samples': 50, 'magnus_order': 2, 'driving_type': 'sinusoidal', 'period': 1.0, 'n_fourier': 10, 'periodic': False, 'seed': 42, 'output_dir': 'data/raw_logs'}
+2026-01-05 18:16:45,150 - __main__ - INFO - 
+======================================================================
+2026-01-05 18:16:45,150 - __main__ - INFO - DIMENSION d=16 (lattice 2×2, 4 qubits)
+2026-01-05 18:16:45,150 - __main__ - INFO - ======================================================================
+2026-01-05 18:16:45,150 - __main__ - INFO - 
+  ρ = 0.020 (K = 5)
+2026-01-05 18:16:45,150 - __main__ - INFO -     Generating K=5 GEO2 operators...
+2026-01-05 18:16:55,177 - __main__ - INFO -       Trial 20/50...
+2026-01-05 18:17:04,476 - __main__ - INFO -       Trial 40/50...
+2026-01-05 18:17:08,069 - __main__ - INFO -     Results:
+2026-01-05 18:17:08,069 - __main__ - INFO -       Regular Moment:     P = 0.0000
+2026-01-05 18:17:08,070 - __main__ - INFO -       Floquet Moment (1): P = 0.0000
+2026-01-05 18:17:08,070 - __main__ - INFO -       Floquet Moment (2): P = 0.0000
+2026-01-05 18:17:08,070 - __main__ - INFO - 
+  ρ = 0.040 (K = 10)
+2026-01-05 18:17:08,070 - __main__ - INFO -     Generating K=10 GEO2 operators...
+2026-01-05 18:17:41,194 - __main__ - INFO -       Trial 20/50...
+2026-01-05 18:18:04,244 - __main__ - INFO -       Trial 40/50...
+2026-01-05 18:18:15,647 - __main__ - INFO -     Results:
+2026-01-05 18:18:15,647 - __main__ - INFO -       Regular Moment:     P = 0.0000
+2026-01-05 18:18:15,647 - __main__ - INFO -       Floquet Moment (1): P = 0.0000
+2026-01-05 18:18:15,647 - __main__ - INFO -       Floquet Moment (2): P = 0.0000
+2026-01-05 18:18:15,647 - __main__ - INFO - 
+  ρ = 0.060 (K = 15)
+2026-01-05 18:18:15,647 - __main__ - INFO -     Generating K=15 GEO2 operators...
+2026-01-05 18:19:09,803 - __main__ - INFO -       Trial 20/50...
+2026-01-05 18:20:14,797 - __main__ - INFO -       Trial 40/50...
+2026-01-05 18:26:47,956 - __main__ - INFO -     Results:
+2026-01-05 18:26:47,958 - __main__ - INFO -       Regular Moment:     P = 0.0000
+2026-01-05 18:26:47,958 - __main__ - INFO -       Floquet Moment (1): P = 0.0000
+2026-01-05 18:26:47,958 - __main__ - INFO -       Floquet Moment (2): P = 0.0000
+2026-01-05 18:26:47,958 - __main__ - INFO - 
+  ρ = 0.080 (K = 20)
+2026-01-05 18:26:47,958 - __main__ - INFO -     Generating K=20 GEO2 operators...
+2026-01-05 21:22:51,652 - __main__ - INFO -       Trial 20/50...
+2026-01-05 21:54:26,534 - __main__ - INFO -       Trial 40/50...
+2026-01-05 21:55:18,347 - __main__ - INFO -     Results:
+2026-01-05 21:55:18,347 - __main__ - INFO -       Regular Moment:     P = 0.0000
+2026-01-05 21:55:18,347 - __main__ - INFO -       Floquet Moment (1): P = 0.0000
+2026-01-05 21:55:18,347 - __main__ - INFO -       Floquet Moment (2): P = 0.0000
+2026-01-05 21:55:18,347 - __main__ - INFO - 
+  ρ = 0.100 (K = 25)
+2026-01-05 21:55:18,347 - __main__ - INFO -     Generating K=25 GEO2 operators...
+2026-01-05 21:59:10,774 - __main__ - INFO -       Trial 20/50...
+2026-01-05 22:02:43,253 - __main__ - INFO -       Trial 40/50...
+2026-01-05 22:15:14,942 - __main__ - INFO -     Results:
+2026-01-05 22:15:14,943 - __main__ - INFO -       Regular Moment:     P = 0.0000
+2026-01-05 22:15:14,943 - __main__ - INFO -       Floquet Moment (1): P = 0.0000
+2026-01-05 22:15:14,943 - __main__ - INFO -       Floquet Moment (2): P = 0.0000
+2026-01-05 22:15:14,945 - __main__ - INFO - 
+Saving results to data/raw_logs/geo2_floquet_20260105_221514.pkl
+2026-01-05 22:15:14,946 - __main__ - INFO - 
+Experiment complete!
+2026-01-05 22:15:14,946 - __main__ - INFO - Total time: 3.97 hours
+2026-01-05 22:15:14,946 - __main__ - INFO - Results saved to: data/raw_logs/geo2_floquet_20260105_221514.pkl

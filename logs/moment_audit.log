@@ -1,0 +1,132 @@
+======================================================================
+GEO2LOCAL MOMENT CRITERION AUDIT
+======================================================================
+
+======================================================================
+PART 1: Moment Criterion Function Signature
+======================================================================
+❌ moment_criterion function NOT FOUND in mathematics.py
+
+======================================================================
+PART 2: Moment Optimization Function
+======================================================================
+
+Optimization functions found: ['get_optimizer_registry', 'maximize_krylov_score', 'maximize_spectral_overlap', 'optimize_multiple_methods']
+⚠️ NO moment optimization function found!
+   This is likely the BUG - Moment can't be optimized!
+
+Spectral optimization functions: ['maximize_spectral_overlap']
+Krylov optimization functions: ['maximize_krylov_score']
+
+======================================================================
+PART 3: How analysis.py handles Moment
+======================================================================
+
+monte_carlo_unreachability_vs_density signature:
+  dims: dims: 'List[int]'
+  rho_max: rho_max: 'float'
+  rho_step: rho_step: 'float'
+  taus: taus: 'List[float]'
+  ensemble: ensemble: 'str'
+  k_cap: k_cap: 'int' = 200
+  nks: nks: 'int' = 150
+  nst: nst: 'int' = 30
+  method: method: 'str' = 'L-BFGS-B'
+  maxiter: maxiter: 'int' = 200
+  seed: seed: 'Optional[int]' = None
+  rank_tol: rank_tol: 'float' = 1e-08
+  data_logger: data_logger: 'Optional[EnhancedDataLogger]' = None
+  optimize_lambda: optimize_lambda: 'bool' = True
+  ensemble_params: **ensemble_params
+
+✓ Function contains both 'optimize_lambda' and 'moment'
+
+'moment' appears 16 times in function
+'optimize_lambda' appears 4 times in function
+
+======================================================================
+PART 4: Actual Moment Data Values
+======================================================================
+
+Loaded: geo2_production_complete_20251229_160541.pkl
+
+FIXED Moment Data:
+  d=16: rho=[0.012, 0.148], P=[0.0000, 0.2850], P_mean=0.0193
+  d=32: rho=[0.010, 0.120], P=[0.0000, 0.0000], P_mean=0.0000
+  d=64: rho=[0.010, 0.100], P=[0.0000, 0.0000], P_mean=0.0000
+
+OPTIMIZED Moment Data:
+  d=16: rho=[0.012, 0.148], P=[0.0000, 0.3367], P_mean=0.0230
+  d=32: rho=[0.010, 0.120], P=[0.0000, 0.0000], P_mean=0.0000
+  d=64: rho=[0.010, 0.100], P=[0.0000, 0.0000], P_mean=0.0000
+
+======================================================================
+PART 5: Fixed vs Optimized Comparison
+======================================================================
+
+d=16:
+  Max |P_fixed - P_opt| = 0.051667
+  Mean |P_fixed - P_opt| = 0.003667
+  ✓ Fixed ≠ Optimized (optimization has effect)
+
+d=32:
+  Max |P_fixed - P_opt| = 0.000000
+  Mean |P_fixed - P_opt| = 0.000000
+  ⚠️ Fixed ≈ Optimized (difference < 0.01)
+
+d=64:
+  Max |P_fixed - P_opt| = 0.000000
+  Mean |P_fixed - P_opt| = 0.000000
+  ⚠️ Fixed ≈ Optimized (difference < 0.01)
+
+======================================================================
+PART 6: moment_criterion_probabilities Implementation
+======================================================================
+
+Function signature: (dims: 'List[int]', k_values: 'List[int]', ensemble: 'str', nks: 'int' = 80, nst: 'int' = 20, seed: 'Optional[int]' = None) -> 'Dict[Tuple[int, int], float]'
+Parameters: ['dims', 'k_values', 'ensemble', 'nks', 'nst', 'seed']
+⚠️ Function may not use lambda parameter
+
+======================================================================
+PART 7: Data Generation Check
+======================================================================
+
+Checking if moment data exists for all configurations:
+  fixed      d=16: ✓ EXISTS
+  fixed      d=32: ✓ EXISTS
+  fixed      d=64: ✓ EXISTS
+  optimized  d=16: ✓ EXISTS
+  optimized  d=32: ✓ EXISTS
+  optimized  d=64: ✓ EXISTS
+
+Checking other criteria for comparison:
+
+SPECTRAL:
+  fixed      d=16: ✓ EXISTS
+  fixed      d=32: ✓ EXISTS
+  fixed      d=64: ✓ EXISTS
+  optimized  d=16: ✓ EXISTS
+  optimized  d=32: ✓ EXISTS
+  optimized  d=64: ✓ EXISTS
+
+KRYLOV:
+  fixed      d=16: ✓ EXISTS
+  fixed      d=32: ✓ EXISTS
+  fixed      d=64: ✓ EXISTS
+  optimized  d=16: ✓ EXISTS
+  optimized  d=32: ✓ EXISTS
+  optimized  d=64: ✓ EXISTS
+
+======================================================================
+AUDIT COMPLETE
+======================================================================
+
+======================================================================
+SUMMARY OF FINDINGS
+======================================================================
+
+1. Check if moment_criterion takes lambda parameter
+2. Check if optimize.py has moment optimization function
+3. Check if analysis.py handles moment optimize_lambda properly
+4. Compare actual P values between Fixed and Optimized
+5. Determine root cause of P≈0 behavior

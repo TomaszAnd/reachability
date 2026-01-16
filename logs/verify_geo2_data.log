@@ -1,0 +1,55 @@
+Loading: data/raw_logs/geo2_production_complete_20251229_160541.pkl
+
+======================================================================
+DATA INTEGRITY CHECK: optimize_lambda Flag Application
+======================================================================
+
+FIXED λ:
+--------------------------------------------------
+
+  d=16:
+    moment: P range [0.000, 0.285] -> VARIES (transition)
+    spectral: P range [1.000, 1.000] -> FLAT (no transition)
+    krylov: P range [0.000, 1.000] -> VARIES (transition)
+
+  d=32:
+    moment: P range [0.000, 0.000] -> FLAT (no transition)
+    spectral: P range [1.000, 1.000] -> FLAT (no transition)
+    krylov: P range [0.000, 1.000] -> VARIES (transition)
+
+  d=64:
+    moment: P range [0.000, 0.000] -> FLAT (no transition)
+    spectral: P range [1.000, 1.000] -> FLAT (no transition)
+    krylov: P range [0.000, 1.000] -> VARIES (transition)
+
+OPTIMIZED λ:
+--------------------------------------------------
+
+  d=16:
+    moment: P range [0.000, 0.337] -> VARIES (transition)
+    spectral: P range [0.063, 1.000] -> VARIES (transition)
+    krylov: P range [0.000, 1.000] -> VARIES (transition)
+
+  d=32:
+    moment: P range [0.000, 0.000] -> FLAT (no transition)
+    spectral: P range [0.605, 1.000] -> VARIES (transition)
+    krylov: P range [0.000, 1.000] -> VARIES (transition)
+
+  d=64:
+    moment: P range [0.000, 0.000] -> FLAT (no transition)
+    spectral: P range [0.930, 1.000] -> FLAT (no transition)
+    krylov: P range [0.000, 0.970] -> VARIES (transition)
+
+======================================================================
+EXPECTED BEHAVIOR:
+----------------------------------------------------------------------
+Fixed λ (random):
+  - Spectral: FLAT at P~1.0 (random λ can't reach targets)
+  - Krylov: SHOULD also be FLAT if it depends on λ
+  - Moment: Independent of λ, may show transitions
+
+Optimized λ:
+  - Spectral: VARIES (phase transition) - optimization finds good λ
+  - Krylov: SHOULD VARY if it depends on λ
+  - Moment: Independent of λ, same as Fixed
+======================================================================

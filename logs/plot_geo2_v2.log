@@ -1,0 +1,52 @@
+/Users/tomas/PycharmProjects/reachability/reachability/scripts/plot_geo2_v2.py:514: UserWarning: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+  ax.legend(fontsize=10, loc='best')
+/Users/tomas/PycharmProjects/reachability/reachability/scripts/plot_geo2_v2.py:514: UserWarning: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+  ax.legend(fontsize=10, loc='best')
+======================================================================
+GEO2LOCAL PUBLICATION PLOTS v2 (Canonical v7 Style)
+======================================================================
+Loaded: geo2_production_complete_20251229_160541.pkl
+
+Dimensions: [16, 32, 64]
+
+======================================================================
+GENERATING PLOTS
+======================================================================
+
+[1/6] Main 1×3 plot with fit equations...
+✓ Generated: geo2_main_1x3_v2.png
+
+[2/6] Scaling plot with linear fit comparison...
+
+Fitting critical densities for scaling plot...
+  d=16: ρ_c = 0.0694 ± 0.0020, R² = 0.969
+  d=32: ρ_c = 0.1326 ± 0.0078, R² = 0.873
+  d=64: ρ_c = 0.1804 ± 0.0894, R² = 0.464
+  Power law: ρ_c = 0.0143 × d^0.614, R² = 0.960
+  Linear: ρ_c = 0.0455 + 0.00220×d, R² = 0.929
+  Linear (origin): ρ_c = 0.00314×d, R² = 0.706
+✓ Generated: geo2_scaling_v2.png
+
+[3/6] d=16 summary plot...
+✓ Generated: geo2_d16_summary.png
+
+[4/6] d=32 summary plot...
+✓ Generated: geo2_d32_summary.png
+
+[5/6] d=64 summary plot...
+✓ Generated: geo2_d64_summary.png
+
+[6/6] Linearized fits plot...
+✓ Generated: geo2_linearized_fits.png
+
+======================================================================
+Generated 6 plots in fig/geo2/
+======================================================================
+
+Output files:
+  geo2_main_1x3_v2.png (448 KB)
+  geo2_scaling_v2.png (260 KB)
+  geo2_d16_summary.png (320 KB)
+  geo2_d32_summary.png (268 KB)
+  geo2_d64_summary.png (219 KB)
+  geo2_linearized_fits.png (232 KB)

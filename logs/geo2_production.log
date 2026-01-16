@@ -1,0 +1,115 @@
+======================================================================
+GEO2LOCAL PRODUCTION EXPERIMENTS
+======================================================================
+Start: 2025-12-29 16:05:41
+Lattices: 3 configurations
+Approaches: Fixed λ, Optimized λ
+Expected runtime: ~5-6 hours
+
+
+======================================================================
+PHASE 1: FIXED λ EXPERIMENTS
+======================================================================
+
+======================================================================
+EXPERIMENT: d=16 (2×2), fixed λ
+======================================================================
+  Density points: 16
+  Trials per point: 30 × 20 = 600
+  Total trials: 9,600
+  Start: 16:05:41
+
+
+✓ Completed d=16 fixed in 1.3 minutes
+  Time per trial: 8.1 ms
+  Checkpoint saved
+
+======================================================================
+EXPERIMENT: d=32 (1×5), fixed λ
+======================================================================
+  Density points: 13
+  Trials per point: 20 × 20 = 400
+  Total trials: 5,200
+  Start: 16:06:59
+
+
+✓ Completed d=32 fixed in 5.1 minutes
+  Time per trial: 58.8 ms
+  Checkpoint saved
+
+======================================================================
+EXPERIMENT: d=64 (2×3), fixed λ
+======================================================================
+  Density points: 11
+  Trials per point: 20 × 10 = 200
+  Total trials: 2,200
+  Start: 16:12:05
+
+
+✓ Completed d=64 fixed in 511.3 minutes
+  Time per trial: 13945.6 ms
+  Checkpoint saved
+
+======================================================================
+PHASE 2: OPTIMIZED λ EXPERIMENTS
+======================================================================
+
+======================================================================
+EXPERIMENT: d=16 (2×2), optimized λ
+======================================================================
+  Density points: 16
+  Trials per point: 30 × 20 = 600
+  Total trials: 9,600
+  Start: 00:43:25
+
+
+✓ Completed d=16 optimized in 53.9 minutes
+  Time per trial: 337.0 ms
+  Checkpoint saved
+
+======================================================================
+EXPERIMENT: d=32 (1×5), optimized λ
+======================================================================
+  Density points: 13
+  Trials per point: 20 × 20 = 400
+  Total trials: 5,200
+  Start: 01:37:20
+
+
+✓ Completed d=32 optimized in 260.1 minutes
+  Time per trial: 3000.9 ms
+  Checkpoint saved
+
+======================================================================
+EXPERIMENT: d=64 (2×3), optimized λ
+======================================================================
+  Density points: 11
+  Trials per point: 20 × 10 = 200
+  Total trials: 2,200
+  Start: 05:57:25
+
+
+✓ Completed d=64 optimized in 1614.4 minutes
+  Time per trial: 44027.9 ms
+  Checkpoint saved
+
+======================================================================
+EXPERIMENTS COMPLETE
+======================================================================
+End: 2025-12-31 08:51:47
+Results: data/raw_logs/geo2_production_complete_20251229_160541.pkl
+
+Runtime Summary:
+  Fixed λ:
+    d=16: 1.3 min (8.1 ms/trial)
+    d=32: 5.1 min (58.8 ms/trial)
+    d=64: 511.3 min (13945.6 ms/trial)
+  Total fixed: 517.7 min
+
+  Optimized λ:
+    d=16: 53.9 min (337.0 ms/trial)
+    d=32: 260.1 min (3000.9 ms/trial)
+    d=64: 1614.4 min (44027.9 ms/trial)
+  Total optimized: 1928.4 min
+
+  Grand total: 2446.1 min (40.8 hours)

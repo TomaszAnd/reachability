@@ -1,0 +1,44 @@
+/Users/tomas/PycharmProjects/reachability/reachability/scripts/plot_geo2_v3.py:438: UserWarning: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+  ax.legend(fontsize=10, loc='best')
+/Users/tomas/PycharmProjects/reachability/reachability/scripts/plot_geo2_v3.py:438: UserWarning: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+  ax.legend(fontsize=10, loc='best')
+======================================================================
+GEO2LOCAL PUBLICATION PLOTS v3
+Canonical v7 Style with Equation Text Boxes
+======================================================================
+
+Linear scaling: ρ_c = 0.0455 + 0.0022×d
+
+======================================================================
+GENERATING PLOTS
+======================================================================
+
+[1/6] Main 1×3 with equation text boxes...
+✓ Generated: geo2_main_v3.png
+
+[2/6] Scaling with LINEAR FIT ONLY...
+✓ Generated: geo2_scaling_v3.png
+
+[3/6] d=16 summary...
+✓ Generated: geo2_d16_summary_v3.png
+
+[4/6] d=32 summary...
+✓ Generated: geo2_d32_summary_v3.png
+
+[5/6] d=64 summary...
+✓ Generated: geo2_d64_summary_v3.png
+
+[6/6] Linearized fits...
+✓ Generated: geo2_linearized_v3.png
+
+======================================================================
+Generated 6 plots in fig/geo2/
+======================================================================
+
+Output files:
+  geo2_main_v3.png (459 KB)
+  geo2_scaling_v3.png (214 KB)
+  geo2_d16_summary_v3.png (343 KB)
+  geo2_d32_summary_v3.png (289 KB)
+  geo2_d64_summary_v3.png (234 KB)
+  geo2_linearized_v3.png (231 KB)

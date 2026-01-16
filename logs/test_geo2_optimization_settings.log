@@ -1,0 +1,41 @@
+======================================================================
+PERFORMANCE OPTIMIZATION TEST: Ensemble-Specific Settings
+======================================================================
+
+TEST 1: Verify get_optimization_settings() function
+----------------------------------------------------------------------
+GEO2 settings:      restarts=1, maxiter=50
+GUE settings:       restarts=2, maxiter=200
+Canonical settings: restarts=2, maxiter=200
+
+✓ GEO2 uses reduced settings (restarts=1, maxiter=50)
+✓ GUE uses default settings (restarts=2, maxiter=200)
+
+TEST 2: Run minimal GEO2 experiment
+----------------------------------------------------------------------
+Configuration: d=16 (2×2 lattice), 2 densities, 5 trials
+Expected: Logs should show 'Using ensemble-specific settings for GEO2: restarts=1, maxiter=50'
+
+
+✓ Experiment completed in 4.5s
+  Result keys: ['dims', 'taus', 'rho_grid', (16, 0.99, 'spectral'), (16, 0.99, 'moment')]...
+
+TEST 3: Performance improvement estimate
+----------------------------------------------------------------------
+Expected speedup from optimization settings:
+  Old: 2 restarts × 200 maxiter = 400 effective evals
+  New: 1 restart × 50 maxiter = 50 effective evals
+  Theoretical speedup: ~8x
+
+Actual runtime for minimal test: 4.5s
+Note: Full production runs should see ~7-8x speedup
+
+======================================================================
+✓ ALL TESTS PASSED
+======================================================================
+
+Summary:
+  - GEO2 correctly uses reduced optimization settings
+  - GUE and canonical correctly use default settings
+  - Minimal experiment runs successfully with new settings
+  - Expected ~7-8x speedup for production GEO2 experiments

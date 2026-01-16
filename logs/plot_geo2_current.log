@@ -1,0 +1,16 @@
+======================================================================
+GEO2LOCAL PUBLICATION PLOTS
+======================================================================
+Loading: geo2_production_complete_20251229_160541.pkl
+Fixed λ dimensions: [16, 32, 64]
+Optimized λ dimensions: [16, 32, 64]
+
+✓ Generated: geo2_fixed_3panel.png
+✓ Generated: geo2_optimized_3panel.png
+✓ Generated: geo2_comparison_d16.png
+✓ Generated: geo2_comparison_d32.png
+✓ Generated: geo2_comparison_d64.png
+✓ Generated: geo2_all_dimensions.png
+
+All plots saved to fig/geo2/
+======================================================================
