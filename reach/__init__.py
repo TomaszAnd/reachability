@@ -1,18 +1,35 @@
 """
 Reach: time-free quantum reachability analysis.
+
+New class-based API:
+    from reach.models import QuantumModel, CanonicalModel, GeometricTwoLocalModel
+    from reach.criteria import SpectralCriterion, KrylovCriterion, MomentCriterion, Verdict
+    from reach.sampling import DensitySweep, SweepConfig
+    from reach import plotting
+
+Legacy API (for backward compatibility with benchmark scripts):
+    from reach import models, mathematics, optimize
 """
 
-from . import analysis, cli, floquet, mathematics, models, optimize, settings, states, viz
+from . import (
+    models,
+    mathematics,
+    optimize,
+    criteria,
+    sampling,
+    math_utils,
+    plotting,
+    settings,
+)
 
 __all__ = [
-    "settings",
     "models",
     "mathematics",
     "optimize",
-    "analysis",
-    "viz",
-    "cli",
-    "floquet",
-    "states",
+    "criteria",
+    "sampling",
+    "math_utils",
+    "plotting",
+    "settings",
 ]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

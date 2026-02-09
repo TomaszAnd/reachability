@@ -1,6 +1,6 @@
 # Publication Plot Documentation
 
-**Generated:** 2026-02-08 20:46
+**Generated:** 2026-02-09 16:31
 
 
 ## Data Provenance
@@ -41,7 +41,7 @@ The corrected Krylov experiments use `m=min(K,d)`, creating genuine phase transi
 - **Based on**:
   - `scripts/canonical/generate_publication_dual_versions.py` (canonical v7 style)
   - `scripts/geo2/plot_geo2_v3.py` (GEO2 v3 style)
-- **Date generated**: 2026-02-08
+- **Date generated**: 2026-02-09
 - **Style reference**: Unified style documented in CLAUDE.md
 
 ---

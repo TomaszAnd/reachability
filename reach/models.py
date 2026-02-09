@@ -1,597 +1,451 @@
 """
-Random matrix ensembles and quantum state generation for reachability analysis.
+Hamiltonian families for quantum reachability analysis.
 
-Pipeline Role:
-This module provides the foundation for all Monte Carlo experiments by generating
-random Hamiltonian ensembles {H₁, H₂, ..., Hₖ} and random target states |φ⟩.
-All generation functions use explicit seeding for full reproducibility.
+A Hamiltonian family defines an operator basis {B_1, ..., B_L}.
+We select K operators to form a control family {H_1, ..., H_K}.
+The combined Hamiltonian is H(lambda) = sum_k lambda_k H_k, where lambda in [-1, 1]^K.
 
-Random Matrix Ensembles:
-- **GOE (Gaussian Orthogonal Ensemble)**: Real symmetric matrices from time-reversal
-  invariant systems. Generated as H = (A + A^T) / √2 where A ~ N(0,1).
+Two families are supported:
+- CanonicalModel: generalized Pauli basis {X_jk, Y_jk, Z_j, I} for arbitrary dimension d
+- GeometricTwoLocalModel: Pauli chains on a rectangular qubit grid
 
-- **GUE (Gaussian Unitary Ensemble)**: Complex Hermitian matrices without symmetry
-  constraints. Generated as H = (A + A†) / √2 where A ~ N(0,1) + iN(0,1).
-
-Both ensembles are normalized to unit variance per entry and satisfy:
-    H† = H (Hermiticity)
-
-These form the basis for parameterized Hamiltonians:
-    H(λ) = Σᵢ₌₁ᴷ λᵢ Hᵢ
-
-where λ ∈ [-1,1]ᴷ are the optimization parameters.
+Design principles:
+- K is the primary parameter (not rho = K/d^2)
+- sample_submodel(K) returns a new QuantumModel, not a list
+- numpy arrays throughout (no qutip.Qobj in interfaces)
+- np.random.SeedSequence with .spawn() for parallel-safe RNG
 """
 
 from __future__ import annotations
 
-import warnings
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import numpy as np
-import qutip
 from scipy.sparse import csr_matrix, eye as speye, kron as spkron
 
-from . import settings
+
+@dataclass
+class ModelMetadata:
+    """Describes how a submodel was derived."""
+    parent_basis_size: int = 0
+    selected_indices: Optional[np.ndarray] = None
+    description: str = ""
 
 
-def setup_rng(seed: int = settings.SEED) -> np.random.RandomState:
+class QuantumModel(ABC):
     """
-    Create a reproducible random number generator.
+    Abstract base class for Hamiltonian families.
 
-    Args:
-        seed: Random seed for reproducibility
-
-    Returns:
-        Configured RandomState instance
-    """
-    return np.random.RandomState(seed)
-
-
-def setup_environment(seed: int = settings.SEED) -> None:
-    """
-    Configure global environment for deterministic quantum computations.
-
-    Args:
-        seed: Global random seed
-    """
-    np.random.seed(seed)
-    qutip.settings.auto_tidyup = settings.AUTO_TIDYUP
-    warnings.filterwarnings("ignore", category=UserWarning)
-
-
-def validate_ensemble_params(dim: int, k: int) -> None:
-    """
-    Validate parameters for Hamiltonian ensemble generation.
-
-    Note: K >= d is now allowed for density sweeps (uses m = min(K, d) for Krylov).
-
-    Args:
-        dim: Hilbert space dimension
-        k: Number of Hamiltonians
-
-    Raises:
-        ValueError: If parameters are invalid
-    """
-    if dim < 2:
-        raise ValueError(f"Dimension must be ≥ 2, got {dim}")
-    if k < 2:
-        raise ValueError(f"Number of Hamiltonians k must be ≥ 2, got {k}")
-
-
-def _random_gaussian_matrix(dim: int, real: bool, rng: np.random.RandomState) -> np.ndarray:
-    """
-    Generate random Gaussian matrix (internal helper).
-
-    Args:
-        dim: Matrix dimension
-        real: If True, generate real matrix; if False, complex
-        rng: Random number generator
-
-    Returns:
-        Random Gaussian matrix
-    """
-    if real:
-        return rng.randn(dim, dim)
-    else:
-        return rng.randn(dim, dim) + 1j * rng.randn(dim, dim)
-
-
-class CanonicalBasis:
-    """
-    Canonical basis for d×d Hermitian matrices.
-
-    Basis consists of:
-    - X_jk = |j⟩⟨k| + |k⟩⟨j| for j < k (Pauli-X like, symmetric)
-    - Y_jk = -i(|j⟩⟨k| - |k⟩⟨j|) for j < k (Pauli-Y like, antisymmetric)
-    - Z_j = |j⟩⟨j| - |j+1⟩⟨j+1| for j < d-1 (Pauli-Z like, diagonal)
-    - I = Identity matrix (optional, to complete the basis to d² operators)
-
-    Total operators: d(d-1)/2 + d(d-1)/2 + (d-1) + 1 = d² operators
-
-    This provides a deterministic, structured basis for parameterized Hamiltonians,
-    in contrast to random ensembles like GOE/GUE.
-
-    Args:
-        dim: Hilbert space dimension
-        include_identity: If True, include identity matrix as d²-th basis operator
+    A Hamiltonian family defines an operator basis {B_1, ..., B_L}.
+    We select K operators to form a control family {H_1, ..., H_K}.
+    The combined Hamiltonian is H(lambda) = sum_k lambda_k H_k,
+    where lambda in [-1, 1]^K.
     """
 
-    def __init__(self, dim: int, include_identity: bool = True):
+    def __init__(self, dim: int, seed: Optional[int] = None):
         if dim < 2:
-            raise ValueError(f"Dimension must be ≥ 2, got {dim}")
-
+            raise ValueError(f"Dimension must be >= 2, got {dim}")
         self.dim = dim
-        self.include_identity = include_identity
+        self._seed_seq = np.random.SeedSequence(seed)
+        self._rng = np.random.default_rng(self._seed_seq)
+        self._basis: Optional[List[np.ndarray]] = None
+        self._metadata = ModelMetadata()
 
-        # Build canonical basis operators
-        self.operators = self._build_canonical_basis()
-        self.L = len(self.operators)
+    @abstractmethod
+    def _build_basis(self) -> List[np.ndarray]:
+        """Build the complete operator basis as numpy arrays."""
+        pass
 
-        # Validate operator count
-        expected_L = dim * dim if include_identity else dim * dim - 1
-        assert self.L == expected_L, (
-            f"Operator count mismatch: got {self.L}, expected {expected_L}"
-        )
+    @property
+    def basis(self) -> List[np.ndarray]:
+        """Lazily-built operator basis as list of (d, d) numpy arrays."""
+        if self._basis is None:
+            self._basis = self._build_basis()
+            self._metadata.parent_basis_size = len(self._basis)
+        return self._basis
 
-    def _build_canonical_basis(self) -> List[qutip.Qobj]:
+    @property
+    def K(self) -> int:
+        """Number of control operators in this model."""
+        return len(self.basis)
+
+    @property
+    def basis_size(self) -> int:
+        """Total number of operators in the full basis (L)."""
+        return len(self.basis)
+
+    @property
+    def metadata(self) -> ModelMetadata:
+        return self._metadata
+
+    @abstractmethod
+    def sample_submodel(self, k: int) -> 'QuantumModel':
         """
-        Build canonical basis operators {X_jk, Y_jk, Z_j, I}.
+        Create a new QuantumModel with k operators sampled from this basis.
+
+        Args:
+            k: Number of operators to select
 
         Returns:
-            List of d² Hermitian operators forming a complete basis
+            A new QuantumModel with k operators as its basis
         """
+        pass
+
+    def spawn_rng(self) -> np.random.Generator:
+        """Create an independent child RNG for parallel/nested sampling."""
+        child_seq = self._seed_seq.spawn(1)[0]
+        return np.random.default_rng(child_seq)
+
+    def init_state(self) -> np.ndarray:
+        """Default initial state |0> (or |00...0> for qubit systems)."""
+        state = np.zeros(self.dim, dtype=np.complex128)
+        state[0] = 1.0
+        return state
+
+    def random_state(self, rng: Optional[np.random.Generator] = None) -> np.ndarray:
+        """Generate a Haar-random pure state as a (d,) numpy array."""
+        if rng is None:
+            rng = self._rng
+        vec = rng.standard_normal(self.dim) + 1j * rng.standard_normal(self.dim)
+        return vec / np.linalg.norm(vec)
+
+    def construct_hamiltonian(self, lambdas: np.ndarray) -> np.ndarray:
+        """Build H(lambda) = sum_k lambda_k H_k."""
+        return sum(l * h for l, h in zip(lambdas, self.basis))
+
+    @classmethod
+    def create(cls, family_type: str, dim: int, **kwargs) -> 'QuantumModel':
+        """
+        Factory method.
+
+        Args:
+            family_type: 'canonical' or 'geometric_local' (aliases: 'geo2', 'qubit_grid')
+            dim: Hilbert space dimension
+            **kwargs: Passed to the specific model constructor
+
+        Returns:
+            QuantumModel instance
+        """
+        ft = family_type.lower()
+        if ft == "canonical":
+            return CanonicalModel(dim, **kwargs)
+        elif ft in ("geometric_local", "geo2", "qubit_grid"):
+            return GeometricTwoLocalModel(dim, **kwargs)
+        raise ValueError(f"Unknown family type: {family_type!r}")
+
+
+class _SubModel(QuantumModel):
+    """A submodel created by selecting operators from a parent model."""
+
+    def __init__(self, dim: int, operators: List[np.ndarray],
+                 metadata: ModelMetadata, seed: Optional[int] = None):
+        super().__init__(dim, seed)
+        self._basis = operators
+        self._metadata = metadata
+
+    def _build_basis(self) -> List[np.ndarray]:
+        return self._basis
+
+    def sample_submodel(self, k: int) -> 'QuantumModel':
+        if k > self.K:
+            raise ValueError(
+                f"Cannot sample {k} operators from submodel with {self.K} operators")
+        if k < 2:
+            raise ValueError(f"Need at least 2 operators, got k={k}")
+        indices = self._rng.choice(self.K, size=k, replace=False)
+        ops = [self._basis[i] for i in indices]
+        meta = ModelMetadata(
+            parent_basis_size=self.K,
+            selected_indices=indices,
+            description=f"Sub-submodel: {k} of {self.K} operators",
+        )
+        child_seed = self._seed_seq.spawn(1)[0].entropy
+        return _SubModel(self.dim, ops, meta, seed=child_seed)
+
+
+class CanonicalModel(QuantumModel):
+    """
+    Canonical basis for d x d Hermitian matrices.
+
+    Basis: {X_jk, Y_jk, Z_j, I}, total d^2 operators.
+    - X_jk = |j><k| + |k><j| for j < k
+    - Y_jk = -i(|j><k| - |k><j|) for j < k
+    - Z_j = |j><j| - |j+1><j+1| for j < d-1
+    - I = identity (optional)
+    """
+
+    def __init__(self, dim: int, include_identity: bool = True,
+                 seed: Optional[int] = None):
+        self.include_identity = include_identity
+        super().__init__(dim, seed)
+
+    def _build_basis(self) -> List[np.ndarray]:
         d = self.dim
         operators = []
 
-        # X_jk operators: |j⟩⟨k| + |k⟩⟨j| for j < k
+        # X_jk operators
         for j in range(d):
             for k in range(j + 1, d):
-                # Create matrix with 1 at (j,k) and (k,j)
-                mat = np.zeros((d, d), dtype=complex)
+                mat = np.zeros((d, d), dtype=np.complex128)
                 mat[j, k] = 1.0
                 mat[k, j] = 1.0
-                operators.append(qutip.Qobj(mat))
+                operators.append(mat)
 
-        # Y_jk operators: -i(|j⟩⟨k| - |k⟩⟨j|) for j < k
+        # Y_jk operators
         for j in range(d):
             for k in range(j + 1, d):
-                # Create matrix with -i at (j,k) and +i at (k,j)
-                mat = np.zeros((d, d), dtype=complex)
+                mat = np.zeros((d, d), dtype=np.complex128)
                 mat[j, k] = -1j
                 mat[k, j] = 1j
-                operators.append(qutip.Qobj(mat))
+                operators.append(mat)
 
-        # Z_j operators: |j⟩⟨j| - |j+1⟩⟨j+1| for j < d-1
+        # Z_j operators
         for j in range(d - 1):
-            # Create diagonal matrix with +1 at position j and -1 at position j+1
-            mat = np.zeros((d, d), dtype=complex)
+            mat = np.zeros((d, d), dtype=np.complex128)
             mat[j, j] = 1.0
             mat[j + 1, j + 1] = -1.0
-            operators.append(qutip.Qobj(mat))
+            operators.append(mat)
 
-        # Identity operator (optional)
+        # Identity
         if self.include_identity:
-            operators.append(qutip.qeye(d))
+            operators.append(np.eye(d, dtype=np.complex128))
+
+        expected_L = d * d if self.include_identity else d * d - 1
+        assert len(operators) == expected_L, (
+            f"Operator count mismatch: got {len(operators)}, expected {expected_L}")
 
         return operators
 
-    def sample_k_operators(self, k: int, rng: np.random.RandomState) -> List[qutip.Qobj]:
-        """
-        Randomly sample k operators from the canonical basis without replacement.
-
-        Args:
-            k: Number of operators to sample
-            rng: Random number generator
-
-        Returns:
-            List of k canonical basis operators
-
-        Raises:
-            ValueError: If k > number of available operators
-        """
-        if k > self.L:
+    def sample_submodel(self, k: int) -> QuantumModel:
+        """Sample k operators from the d^2 canonical basis without replacement."""
+        L = self.basis_size
+        if k > L:
             raise ValueError(
-                f"Cannot sample {k} operators from canonical basis of size {self.L}"
-            )
+                f"Cannot sample {k} operators from canonical basis of size {L}")
         if k < 2:
             raise ValueError(f"Need at least 2 operators, got k={k}")
 
-        # Sample indices without replacement
-        indices = rng.choice(self.L, size=k, replace=False)
+        indices = self._rng.choice(L, size=k, replace=False)
+        ops = [self.basis[i] for i in indices]
 
-        # Return corresponding operators
-        return [self.operators[i] for i in indices]
+        meta = ModelMetadata(
+            parent_basis_size=L,
+            selected_indices=indices,
+            description=f"Canonical submodel: {k} of {L} operators (d={self.dim})",
+        )
+        child_seed = self._seed_seq.spawn(1)[0].entropy
+        return _SubModel(self.dim, ops, meta, seed=child_seed)
 
 
-class GeometricTwoLocal:
+# GEO2 lattice configs: dimension -> (nx, ny)
+GEO2_LATTICE_CONFIGS = {
+    8: (1, 3),
+    16: (2, 2),
+    32: (1, 5),
+    64: (2, 3),
+}
+
+
+class GeometricTwoLocalModel(QuantumModel):
     """
-    Gaussian Geo-Local (GEO2) ensemble on a rectangular lattice.
+    Geometric two-local Hamiltonian family on a rectangular qubit lattice.
 
-    Basis: P_2(G) contains all 1-local {X,Y,Z}_i and 2-local {X,Y,Z}_i⊗{X,Y,Z}_j
-    Pauli terms on lattice sites and nearest-neighbor edges.
+    Basis: P_2(G) = {X_i, Y_i, Z_i} (1-local) + {sigma_i x sigma_j} (2-local)
+    Total operators: L = 3n + 9|E(G)| where n = nx * ny, |E| = edges.
 
-    Hamiltonian: H = (1/√L) Σ_a g_a P_a where g_a ~ N(0,1), L = |P_2(G)|.
+    For each site, there are 3 single-qubit Pauli operators.
+    For each edge, there are 9 two-qubit Pauli tensor products.
 
-    Formula: L = 3n + 9|E(G)| where n = nx * ny sites, |E(G)| = number of edges.
-
-    Args:
-        nx: Lattice width (number of sites in x direction)
-        ny: Lattice height (number of sites in y direction)
-        periodic: Use periodic boundary conditions
-        backend: "sparse" (default) or "dense" operator construction
+    Dimension: d = 2^(nx * ny).
     """
 
-    def __init__(self, nx: int, ny: int, periodic: bool = False, backend: str = "sparse"):
-        if nx < 1 or ny < 1:
-            raise ValueError(f"Lattice dimensions must be ≥ 1, got nx={nx}, ny={ny}")
+    def __init__(self, dim: int, nx: Optional[int] = None,
+                 ny: Optional[int] = None, periodic: bool = False,
+                 seed: Optional[int] = None):
+        # Infer lattice dimensions if not provided
+        if nx is None or ny is None:
+            if dim in GEO2_LATTICE_CONFIGS:
+                nx, ny = GEO2_LATTICE_CONFIGS[dim]
+            else:
+                raise ValueError(
+                    f"Cannot infer lattice for d={dim}. "
+                    f"Provide nx, ny explicitly. Known dims: {list(GEO2_LATTICE_CONFIGS.keys())}")
 
         self.nx = nx
         self.ny = ny
         self.periodic = periodic
-        self.backend = backend
         self.n_sites = nx * ny
-        self.dim = 2 ** self.n_sites
 
-        # Build sparse Pauli basis
-        self.Hs = self._build_pauli_basis()
-        self.L = len(self.Hs)
+        expected_dim = 2 ** self.n_sites
+        if dim != expected_dim:
+            raise ValueError(
+                f"Dimension {dim} does not match lattice {nx}x{ny} = {self.n_sites} sites "
+                f"(expected 2^{self.n_sites} = {expected_dim})")
 
-        # Validate operator count: L = 3n + 9|E|
-        edges = self._build_lattice_edges()
-        expected_L = 3 * self.n_sites + 9 * len(edges)
-        assert self.L == expected_L, (
-            f"Operator count mismatch: got {self.L}, expected {expected_L} "
-            f"(3n={3*self.n_sites} + 9|E|={9*len(edges)})"
-        )
+        super().__init__(dim, seed)
 
     def _build_lattice_edges(self) -> List[Tuple[int, int]]:
-        """Build edge list for rectangular lattice with nearest-neighbor connectivity."""
+        """Build edge list for rectangular lattice."""
         edges = []
         for y in range(self.ny):
             for x in range(self.nx):
                 site = y * self.nx + x
-
-                # Right neighbor (x+1)
                 if x + 1 < self.nx:
-                    neighbor = y * self.nx + (x + 1)
-                    edges.append((site, neighbor))
+                    edges.append((site, y * self.nx + (x + 1)))
                 elif self.periodic and self.nx > 1:
-                    neighbor = y * self.nx + 0
-                    edges.append((site, neighbor))
-
-                # Down neighbor (y+1)
+                    edges.append((site, y * self.nx + 0))
                 if y + 1 < self.ny:
-                    neighbor = (y + 1) * self.nx + x
-                    edges.append((site, neighbor))
+                    edges.append((site, (y + 1) * self.nx + x))
                 elif self.periodic and self.ny > 1:
-                    neighbor = 0 * self.nx + x
-                    edges.append((site, neighbor))
-
+                    edges.append((site, 0 * self.nx + x))
         return edges
 
-    def _build_pauli_basis(self) -> List[qutip.Qobj]:
-        """Build sparse Pauli basis P_2(G) for the lattice."""
-        if self.backend == "sparse":
-            return self._build_sparse_pauli_basis()
-        else:
-            return self._build_dense_pauli_basis()
-
-    def _build_sparse_pauli_basis(self) -> List[qutip.Qobj]:
-        """Build Pauli basis using sparse matrix operations."""
-        # Pauli matrices as sparse matrices
+    def _build_basis(self) -> List[np.ndarray]:
+        """Build Pauli basis P_2(G) using sparse matrix operations."""
         pauli_x = csr_matrix(np.array([[0, 1], [1, 0]], dtype=complex))
         pauli_y = csr_matrix(np.array([[0, -1j], [1j, 0]], dtype=complex))
         pauli_z = csr_matrix(np.array([[1, 0], [0, -1]], dtype=complex))
         identity = speye(2, dtype=complex, format='csr')
-
         paulis = [pauli_x, pauli_y, pauli_z]
         basis = []
 
-        # 1-local terms: X_i, Y_i, Z_i for each site
-        for site in range(self.n_sites):
-            for pauli in paulis:
-                # Build I ⊗ ... ⊗ I ⊗ Pauli_site ⊗ I ⊗ ... ⊗ I
-                op = identity
-                for s in range(self.n_sites):
-                    if s == 0:
-                        op = pauli if s == site else identity
-                    else:
-                        op = spkron(op, pauli if s == site else identity, format='csr')
-
-                basis.append(qutip.Qobj(op, dims=[[self.dim], [self.dim]]))
-
-        # 2-local terms: Pauli_i ⊗ Pauli_j for each edge
-        edges = self._build_lattice_edges()
-        for site_i, site_j in edges:
-            for pauli_i in paulis:
-                for pauli_j in paulis:
-                    # Build tensor product with Pauli operators on sites i and j
-                    op = identity
-                    for s in range(self.n_sites):
-                        if s == 0:
-                            if s == site_i:
-                                op = pauli_i
-                            elif s == site_j:
-                                op = pauli_j
-                            else:
-                                op = identity
-                        else:
-                            if s == site_i:
-                                op = spkron(op, pauli_i, format='csr')
-                            elif s == site_j:
-                                op = spkron(op, pauli_j, format='csr')
-                            else:
-                                op = spkron(op, identity, format='csr')
-
-                    basis.append(qutip.Qobj(op, dims=[[self.dim], [self.dim]]))
-
-        return basis
-
-    def _build_dense_pauli_basis(self) -> List[qutip.Qobj]:
-        """Build Pauli basis using dense qutip tensor products (for small systems)."""
-        # Pauli matrices
-        pauli_ops = [qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
-        identity = qutip.qeye(2)
-
-        basis = []
+        def _build_operator(site_ops):
+            """Build tensor product operator given {site: pauli} mapping."""
+            op = None
+            for s in range(self.n_sites):
+                p = site_ops.get(s, identity)
+                if op is None:
+                    op = p
+                else:
+                    op = spkron(op, p, format='csr')
+            return op.toarray()
 
         # 1-local terms
         for site in range(self.n_sites):
-            for pauli in pauli_ops:
-                ops = [identity] * self.n_sites
-                ops[site] = pauli
-                term = qutip.tensor(ops)
-                # Flatten dims to match pipeline expectations
-                term.dims = [[self.dim], [self.dim]]
-                basis.append(term)
+            for pauli in paulis:
+                basis.append(_build_operator({site: pauli}))
 
         # 2-local terms
+        for site_i, site_j in self._build_lattice_edges():
+            for pauli_i in paulis:
+                for pauli_j in paulis:
+                    basis.append(_build_operator({site_i: pauli_i, site_j: pauli_j}))
+
+        # Validate
         edges = self._build_lattice_edges()
-        for site_i, site_j in edges:
-            for pauli_i in pauli_ops:
-                for pauli_j in pauli_ops:
-                    ops = [identity] * self.n_sites
-                    ops[site_i] = pauli_i
-                    ops[site_j] = pauli_j
-                    term = qutip.tensor(ops)
-                    # Flatten dims to match pipeline expectations
-                    term.dims = [[self.dim], [self.dim]]
-                    basis.append(term)
+        expected_L = 3 * self.n_sites + 9 * len(edges)
+        assert len(basis) == expected_L, (
+            f"Operator count mismatch: got {len(basis)}, expected {expected_L}")
 
         return basis
 
-    def sample_lambda(self, rng) -> np.ndarray:
+    def sample_submodel(self, k: int) -> QuantumModel:
         """
-        Sample Gaussian coefficients for GEO2 Hamiltonian.
+        Create a submodel by sampling k random Hamiltonians.
 
-        Returns: λ = g/√L where g ~ N(0, I_L), so E[λ_a^2] = 1/L.
+        Each sampled Hamiltonian is a random weighted sum of all L basis operators:
+        H_i = (1/sqrt(L)) sum_a g_a^(i) P_a, where g_a ~ N(0,1).
 
-        Args:
-            rng: numpy random Generator or RandomState
+        This matches the GEO2 definition from arXiv:2510.06321.
         """
-        # Support both old and new numpy random APIs
-        if hasattr(rng, 'standard_normal'):
-            return rng.standard_normal(self.L) / np.sqrt(self.L)
-        else:
-            return rng.randn(self.L) / np.sqrt(self.L)
+        L = self.basis_size
+        if k < 2:
+            raise ValueError(f"Need at least 2 operators, got k={k}")
 
-    def sample_hamiltonian(self, rng: np.random.RandomState) -> qutip.Qobj:
-        """Generate one GEO2 Hamiltonian instance: H = Σ_a λ_a H_a."""
-        lambdas = self.sample_lambda(rng)
-        H = sum(lam * H for lam, H in zip(lambdas, self.Hs))
-        return H
+        child_rngs = [
+            np.random.default_rng(s) for s in self._seed_seq.spawn(k)
+        ]
 
+        ops = []
+        for rng in child_rngs:
+            coeffs = rng.standard_normal(L) / np.sqrt(L)
+            H = sum(c * B for c, B in zip(coeffs, self.basis))
+            ops.append(H)
 
-def random_hermitian_matrix(dim: int, real: bool = True, seed: Optional[int] = None) -> qutip.Qobj:
-    """
-    Generate random Hermitian matrix from GOE (real=True) or GUE (real=False).
-
-    For GOE: H = (A + A^T) / √2 where A ~ N(0,1)^(d×d)
-    For GUE: H = (A + A†) / √2 where A ~ N(0,1)^(d×d) + iN(0,1)^(d×d)
-
-    Args:
-        dim: Hilbert space dimension
-        real: If True, generate GOE; if False, generate GUE
-        seed: Random seed (uses settings.SEED if None)
-
-    Returns:
-        Random Hermitian QuTiP operator
-    """
-    validate_ensemble_params(dim, 2)  # Minimal validation
-
-    if seed is None:
-        seed = settings.SEED
-    rng = setup_rng(seed)
-
-    # Generate random matrix
-    A = _random_gaussian_matrix(dim, real, rng)
-    qobj = qutip.Qobj(A)
-
-    # Make Hermitian and normalize
-    if real:
-        H = (qobj + qobj.trans()) / np.sqrt(2)
-    else:
-        H = (qobj + qobj.trans().conj()) / np.sqrt(2)
-
-    return H
+        meta = ModelMetadata(
+            parent_basis_size=L,
+            description=f"GEO2 submodel: {k} random Hamiltonians "
+                        f"(lattice {self.nx}x{self.ny}, d={self.dim})",
+        )
+        child_seed = self._seed_seq.spawn(1)[0].entropy
+        return _SubModel(self.dim, ops, meta, seed=child_seed)
 
 
-# Ensemble registry for factory pattern
-ENSEMBLES = {
-    "GOE": "GOE",
-    "GUE": "GUE",
-    "GEO2": "GEO2",
-    "canonical": "canonical",
-}
+# ============================================================================
+# Legacy compatibility layer (for confusion_matrix_benchmark.py and tests)
+# ============================================================================
+
+import qutip
+from . import settings as _settings
+
+
+def setup_rng(seed: int = _settings.SEED) -> np.random.RandomState:
+    """Create a reproducible random number generator (legacy)."""
+    return np.random.RandomState(seed)
 
 
 def random_hamiltonian_ensemble(
     dim: int, k: int, ensemble: str, seed: Optional[int] = None, **kwargs
 ) -> List[qutip.Qobj]:
     """
-    Generate k random Hamiltonians from specified ensemble.
+    Generate k random Hamiltonians from specified ensemble (legacy interface).
 
-    Args:
-        dim: Hilbert space dimension
-        k: Number of Hamiltonians to generate
-        ensemble: "GOE", "GUE", "GEO2", or "canonical"
-        seed: Random seed (uses settings.SEED if None)
-        **kwargs: Ensemble-specific parameters
-            - For GEO2: nx, ny, periodic
-            - For canonical: include_identity (default True)
-
-    Returns:
-        List of k random Hermitian operators
-
-    Raises:
-        ValueError: If ensemble is not recognized or parameters are invalid
+    Returns qutip.Qobj list for backward compatibility.
     """
-    validate_ensemble_params(dim, k)
-
-    if ensemble not in ENSEMBLES:
-        raise ValueError(
-            f"Ensemble must be one of {list(ENSEMBLES.keys())}, got '{ensemble}'"
-        )
-
     if seed is None:
-        seed = settings.SEED
+        seed = _settings.SEED
     rng = setup_rng(seed)
 
-    hamiltonians = []
+    if ensemble == "canonical":
+        include_identity = kwargs.get("include_identity", True)
+        model = CanonicalModel(dim, include_identity=include_identity, seed=seed)
+        sub = model.sample_submodel(k)
+        return [qutip.Qobj(op) for op in sub.basis]
 
-    if ensemble == "GEO2":
-        # Extract lattice parameters
+    elif ensemble == "GEO2":
         nx = kwargs.get("nx")
         ny = kwargs.get("ny")
         periodic = kwargs.get("periodic", False)
-        geo2_optimize_weights = kwargs.get("geo2_optimize_weights", False)
-
         if nx is None or ny is None:
             raise ValueError("GEO2 ensemble requires 'nx' and 'ny' parameters")
+        model = GeometricTwoLocalModel(dim, nx=nx, ny=ny, periodic=periodic, seed=seed)
+        sub = model.sample_submodel(k)
+        return [qutip.Qobj(op) for op in sub.basis]
 
-        # Validate dimension matches lattice size
-        n_sites = nx * ny
-        expected_dim = 2 ** n_sites
-        if dim != expected_dim:
-            raise ValueError(
-                f"Dimension {dim} does not match lattice size {nx}×{ny} = {n_sites} sites "
-                f"(expected dimension 2^{n_sites} = {expected_dim})"
-            )
-
-        # Create GEO2 instance (builds basis once)
-        geo2 = GeometricTwoLocal(nx, ny, periodic, backend="sparse")
-
-        if geo2_optimize_weights:
-            # Approach 1: Sample K basis operators (weights optimized by maximize_* functions)
-            # Similar to canonical ensemble - select without replacement
-            if k > geo2.L:
-                raise ValueError(
-                    f"Cannot sample {k} operators from GEO2 basis of size {geo2.L} "
-                    f"(lattice {nx}×{ny}). Maximum k = {geo2.L}."
-                )
-            indices = rng.choice(geo2.L, size=k, replace=False)
-            hamiltonians = [geo2.Hs[i] for i in indices]
-        else:
-            # Approach 2a: Sample k Hamiltonians with fixed random weights (default, arXiv definition)
-            for i in range(k):
-                h_seed = rng.randint(0, 2**31 - 1)
-                h_rng = setup_rng(h_seed)
-                H = geo2.sample_hamiltonian(h_rng)
-                hamiltonians.append(H)
-
-    elif ensemble == "canonical":
-        # Canonical basis: sample k operators from {X_jk, Y_jk, Z_j, I}
-        include_identity = kwargs.get("include_identity", True)
-
-        # Create canonical basis instance (builds all d² operators)
-        canonical = CanonicalBasis(dim, include_identity=include_identity)
-
-        # Validate k doesn't exceed basis size
-        if k > canonical.L:
-            raise ValueError(
-                f"Cannot sample {k} operators from canonical basis of size {canonical.L} "
-                f"(dimension {dim}). Maximum k = {canonical.L}."
-            )
-
-        # Sample k operators without replacement
-        hamiltonians = canonical.sample_k_operators(k, rng)
-
-    else:
-        # GOE or GUE
-        real_valued = ensemble == "GOE"
+    elif ensemble in ("GOE", "GUE"):
+        real_valued = (ensemble == "GOE")
+        hamiltonians = []
         for i in range(k):
             h_seed = rng.randint(0, 2**31 - 1)
-            H = random_hermitian_matrix(dim, real=real_valued, seed=h_seed)
-            hamiltonians.append(H)
+            h_rng = setup_rng(h_seed)
+            A = h_rng.randn(dim, dim)
+            if not real_valued:
+                A = A + 1j * h_rng.randn(dim, dim)
+            H = (A + A.conj().T) / np.sqrt(2)
+            hamiltonians.append(qutip.Qobj(H))
+        return hamiltonians
 
-    return hamiltonians
+    else:
+        raise ValueError(f"Unknown ensemble: {ensemble!r}")
 
 
 def random_states(n: int, dim: int, seed: Optional[int] = None) -> List[qutip.Qobj]:
-    """
-    Generate n random quantum states using controlled seeding.
-
-    Uses QuTiP's rand_ket with explicit numpy seeding for reproducibility.
-
-    Args:
-        n: Number of states to generate
-        dim: Hilbert space dimension
-        seed: Random seed (uses settings.SEED if None)
-
-    Returns:
-        List of n random quantum states
-    """
-    if dim < 2:
-        raise ValueError(f"Dimension must be ≥ 2, got {dim}")
-    if n < 1:
-        raise ValueError(f"Number of states n must be ≥ 1, got {n}")
-
+    """Generate n random quantum states (legacy interface, returns qutip.Qobj)."""
     if seed is None:
-        seed = settings.SEED
+        seed = _settings.SEED
     rng = setup_rng(seed)
-
     states = []
     for i in range(n):
         state_seed = rng.randint(0, 2**31 - 1)
-        # QuTiP 5.x ignores np.random.seed(); use seed= parameter directly
         state = qutip.rand_ket(dim, seed=state_seed)
         states.append(state)
-
     return states
 
 
 def fock_state(dim: int, n: int = 0) -> qutip.Qobj:
-    """
-    Generate computational basis state |n⟩.
-
-    Args:
-        dim: Hilbert space dimension
-        n: Basis state index (default: |0⟩)
-
-    Returns:
-        Fock state |n⟩
-    """
+    """Generate computational basis state |n> (legacy interface)."""
     if not (0 <= n < dim):
         raise ValueError(f"Basis index n={n} must be in range [0, {dim})")
     return qutip.fock(dim, n)
-
-
-# Legacy compatibility functions for existing code
-def random_k_goes(dim: int, k: int, seed: Optional[int] = None) -> List[qutip.Qobj]:
-    """Legacy: Generate k random GOE matrices (deprecated - use random_hamiltonian_ensemble)."""
-    warnings.warn(
-        "random_k_goes is deprecated, use random_hamiltonian_ensemble(..., ensemble='GOE')",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return random_hamiltonian_ensemble(dim, k, "GOE", seed)
-
-
-def random_k_gues(dim: int, k: int, seed: Optional[int] = None) -> List[qutip.Qobj]:
-    """Legacy: Generate k random GUE matrices (deprecated - use random_hamiltonian_ensemble)."""
-    warnings.warn(
-        "random_k_gues is deprecated, use random_hamiltonian_ensemble(..., ensemble='GUE')",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return random_hamiltonian_ensemble(dim, k, "GUE", seed)
