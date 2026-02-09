@@ -186,16 +186,6 @@ Examples:
         help=f"Unreachability threshold (default: {settings.DEFAULT_TAU})",
     )
 
-    # punreach-grid subcommand - DISABLED (replaced by spectral overlap criterion)
-    # cmd_punreach = subparsers.add_parser('punreach-grid',
-    #                                     help='Generate P(unreachability) vs (d,K) heatmaps')
-    # cmd_punreach.add_argument('--d-range', type=str, default='3,4,5,6,7,8,10,12,15',
-    #                          help='Comma-separated dimensions')
-    # cmd_punreach.add_argument('--k-range', type=str, default='2,3,4,5,6,7',
-    #                          help='Comma-separated K values')
-    # cmd_punreach.add_argument('--epsilons', type=str, default='0.90,0.95,0.97,0.99',
-    #                          help='Comma-separated epsilon thresholds')
-
     # iter-sweep subcommand
     cmd_iter = subparsers.add_parser("iter-sweep", help="Generate iteration convergence analysis")
     cmd_iter.add_argument(
@@ -245,8 +235,8 @@ Examples:
     cmd_rank.add_argument(
         "--hide-floored",
         action="store_true",
-        default=True,
-        help="Hide points with p <= eps_floor to avoid cliff artifacts (default: True)",
+        default=False,
+        help="Hide points with p <= eps_floor to avoid cliff artifacts",
     )
 
     # audit-moment-criterion subcommand
@@ -348,7 +338,7 @@ Examples:
         "three-criteria-vs-K", help="Compare 3 criteria vs K (number of Hamiltonians)"
     )
     cmd_3crit_K.add_argument(
-        "--ensemble", choices=["GOE", "GUE", "GEO2"], required=True, help="Random matrix ensemble"
+        "--ensemble", choices=["GOE", "GUE", "GEO2", "canonical"], required=True, help="Random matrix ensemble"
     )
     cmd_3crit_K.add_argument(
         "-d", "--dim", type=int, required=True, help="Hilbert space dimension (fixed)"
@@ -384,7 +374,7 @@ Examples:
         help="Compare 3 criteria vs density (K/d²) for multiple dimensions",
     )
     cmd_3crit_dens.add_argument(
-        "--ensemble", choices=["GOE", "GUE", "GEO2"], required=True, help="Random matrix ensemble"
+        "--ensemble", choices=["GOE", "GUE", "GEO2", "canonical"], required=True, help="Random matrix ensemble"
     )
     cmd_3crit_dens.add_argument(
         "--dims",
@@ -438,6 +428,18 @@ Examples:
         default=10,
         help="Flush CSV to disk every N data points (default: 10, enables streaming/resumable runs)",
     )
+    cmd_3crit_dens.add_argument(
+        "--log-data",
+        action="store_true",
+        default=False,
+        help="Enable enhanced data logging (saves raw scores to pickle for post-hoc analysis)",
+    )
+    cmd_3crit_dens.add_argument(
+        "--log-data-dir",
+        type=str,
+        default="data/raw_logs",
+        help="Directory for enhanced data logs (default: data/raw_logs)",
+    )
 
     # three-criteria-vs-K-multi-tau subcommand
     cmd_3crit_K_multitau = subparsers.add_parser(
@@ -445,7 +447,7 @@ Examples:
         help="K-sweep with multiple τ for spectral (shows gradient)",
     )
     cmd_3crit_K_multitau.add_argument(
-        "--ensemble", choices=["GOE", "GUE", "GEO2"], required=True, help="Random matrix ensemble"
+        "--ensemble", choices=["GOE", "GUE", "GEO2", "canonical"], required=True, help="Random matrix ensemble"
     )
     cmd_3crit_K_multitau.add_argument(
         "-d", "--dim", type=int, required=True, help="Hilbert space dimension (fixed)"
@@ -705,31 +707,6 @@ def cmd_optimizer_hist(args) -> None:
                 data, ensemble=args.ensemble, d=d, k=args.kmax, output_dir=args.outdir
             )
             print(f"Saved: {saved_path}")
-
-
-# DISABLED: punreach-grid functionality replaced by spectral overlap criterion
-# def cmd_punreach_grid(args) -> None:
-#     """Execute punreach-grid subcommand."""
-#     d_range = parse_comma_separated(args.d_range, int)
-#     k_range = parse_comma_separated(args.k_range, int)
-#     epsilons = parse_comma_separated(args.epsilons, float)
-#     nks, nst = get_sampling_params(args.fast)
-#
-#     logger.info(f"Generating P(unreachability) grids: epsilons={epsilons}, {args.ensemble}")
-#
-#     # Compute heatmap data
-#     data = analysis.punreach_vs_dimension_K(
-#         d_range=d_range, K_range=k_range, ensemble=args.ensemble,
-#         epsilons=epsilons, nks=nks//2, nst=nst//2, seed=args.seed
-#     )
-#
-#     # Generate plots for each epsilon
-#     for eps in epsilons:
-#         saved_path = viz.plot_punreach_heatmaps(
-#             data, ensemble=args.ensemble, epsilon=eps,
-#             output_dir=args.outdir
-#         )
-#         print(f"Saved: {saved_path}")
 
 
 def cmd_iter_sweep(args) -> None:
@@ -1188,7 +1165,7 @@ def cmd_three_criteria_vs_density(args) -> None:
     taus = parse_comma_separated(args.taus, float)
 
     # HARD ASSERTION: Density sweeps must use exact dims for GOE/GUE (publication standard)
-    # For GEO2, allow flexible power-of-2 dimensions
+    # For GEO2 and canonical, allow flexible dimensions
     if args.ensemble in ["GOE", "GUE"]:
         REQUIRED_DIMS = {20, 30, 40, 50}
         if set(dims) != REQUIRED_DIMS:
@@ -1196,6 +1173,9 @@ def cmd_three_criteria_vs_density(args) -> None:
                 f"Density sweep for {args.ensemble} requires EXACTLY dims={sorted(REQUIRED_DIMS)}, "
                 f"got dims={sorted(set(dims))}. This ensures publication-ready comparisons."
             )
+    elif args.ensemble == "canonical":
+        # Canonical basis: typical dims are 10,12,14 (basis size = d²)
+        logger.info(f"Canonical ensemble: using dims={dims} (basis size = d² for each)")
 
     # Validate and extract ensemble parameters (for GEO2)
     ensemble_params = validate_geo2_params(args)
@@ -1211,20 +1191,51 @@ def cmd_three_criteria_vs_density(args) -> None:
     )
     if ensemble_params:
         logger.info(f"  GEO2 lattice: nx={ensemble_params['nx']}, ny={ensemble_params['ny']}, periodic={ensemble_params['periodic']}")
+    if args.log_data:
+        logger.info(f"  Enhanced data logging enabled: {args.log_data_dir}")
+
+    # Setup enhanced data logger if requested
+    data_logger = None
+    if args.log_data:
+        metadata = {
+            'rho_max': args.rho_max,
+            'rho_step': args.rho_step,
+            'k_cap': args.k_cap,
+            'taus': taus,
+            'nks': nks,
+            'nst': nst,
+            'seed': args.seed,
+            'method': settings.DEFAULT_METHOD,
+            'maxiter': settings.DEFAULT_MAXITER,
+            **ensemble_params,
+        }
+        data_logger = logging_utils.EnhancedDataLogger(
+            output_dir=args.log_data_dir,
+            ensemble=args.ensemble,
+            dims=dims,
+            metadata=metadata,
+            enable_logging=True,
+        )
 
     # Compute
-    data = analysis.monte_carlo_unreachability_vs_density(
-        dims=dims,
-        rho_max=args.rho_max,
-        rho_step=args.rho_step,
-        taus=taus,
-        ensemble=args.ensemble,
-        k_cap=args.k_cap,
-        nks=nks,
-        nst=nst,
-        seed=args.seed,
-        **ensemble_params,
-    )
+    try:
+        data = analysis.monte_carlo_unreachability_vs_density(
+            dims=dims,
+            rho_max=args.rho_max,
+            rho_step=args.rho_step,
+            taus=taus,
+            ensemble=args.ensemble,
+            k_cap=args.k_cap,
+            nks=nks,
+            nst=nst,
+            seed=args.seed,
+            data_logger=data_logger,
+            **ensemble_params,
+        )
+    finally:
+        # Save enhanced data logger if it was used
+        if data_logger is not None:
+            data_logger.save()
 
     # CSV logging (if requested) - using streaming writer
     if args.csv:

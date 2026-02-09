@@ -96,6 +96,113 @@ def _random_gaussian_matrix(dim: int, real: bool, rng: np.random.RandomState) ->
         return rng.randn(dim, dim) + 1j * rng.randn(dim, dim)
 
 
+class CanonicalBasis:
+    """
+    Canonical basis for d×d Hermitian matrices.
+
+    Basis consists of:
+    - X_jk = |j⟩⟨k| + |k⟩⟨j| for j < k (Pauli-X like, symmetric)
+    - Y_jk = -i(|j⟩⟨k| - |k⟩⟨j|) for j < k (Pauli-Y like, antisymmetric)
+    - Z_j = |j⟩⟨j| - |j+1⟩⟨j+1| for j < d-1 (Pauli-Z like, diagonal)
+    - I = Identity matrix (optional, to complete the basis to d² operators)
+
+    Total operators: d(d-1)/2 + d(d-1)/2 + (d-1) + 1 = d² operators
+
+    This provides a deterministic, structured basis for parameterized Hamiltonians,
+    in contrast to random ensembles like GOE/GUE.
+
+    Args:
+        dim: Hilbert space dimension
+        include_identity: If True, include identity matrix as d²-th basis operator
+    """
+
+    def __init__(self, dim: int, include_identity: bool = True):
+        if dim < 2:
+            raise ValueError(f"Dimension must be ≥ 2, got {dim}")
+
+        self.dim = dim
+        self.include_identity = include_identity
+
+        # Build canonical basis operators
+        self.operators = self._build_canonical_basis()
+        self.L = len(self.operators)
+
+        # Validate operator count
+        expected_L = dim * dim if include_identity else dim * dim - 1
+        assert self.L == expected_L, (
+            f"Operator count mismatch: got {self.L}, expected {expected_L}"
+        )
+
+    def _build_canonical_basis(self) -> List[qutip.Qobj]:
+        """
+        Build canonical basis operators {X_jk, Y_jk, Z_j, I}.
+
+        Returns:
+            List of d² Hermitian operators forming a complete basis
+        """
+        d = self.dim
+        operators = []
+
+        # X_jk operators: |j⟩⟨k| + |k⟩⟨j| for j < k
+        for j in range(d):
+            for k in range(j + 1, d):
+                # Create matrix with 1 at (j,k) and (k,j)
+                mat = np.zeros((d, d), dtype=complex)
+                mat[j, k] = 1.0
+                mat[k, j] = 1.0
+                operators.append(qutip.Qobj(mat))
+
+        # Y_jk operators: -i(|j⟩⟨k| - |k⟩⟨j|) for j < k
+        for j in range(d):
+            for k in range(j + 1, d):
+                # Create matrix with -i at (j,k) and +i at (k,j)
+                mat = np.zeros((d, d), dtype=complex)
+                mat[j, k] = -1j
+                mat[k, j] = 1j
+                operators.append(qutip.Qobj(mat))
+
+        # Z_j operators: |j⟩⟨j| - |j+1⟩⟨j+1| for j < d-1
+        for j in range(d - 1):
+            # Create diagonal matrix with +1 at position j and -1 at position j+1
+            mat = np.zeros((d, d), dtype=complex)
+            mat[j, j] = 1.0
+            mat[j + 1, j + 1] = -1.0
+            operators.append(qutip.Qobj(mat))
+
+        # Identity operator (optional)
+        if self.include_identity:
+            operators.append(qutip.qeye(d))
+
+        return operators
+
+    def sample_k_operators(self, k: int, rng: np.random.RandomState) -> List[qutip.Qobj]:
+        """
+        Randomly sample k operators from the canonical basis without replacement.
+
+        Args:
+            k: Number of operators to sample
+            rng: Random number generator
+
+        Returns:
+            List of k canonical basis operators
+
+        Raises:
+            ValueError: If k > number of available operators
+        """
+        if k > self.L:
+            raise ValueError(
+                f"Cannot sample {k} operators from canonical basis of size {self.L}"
+            )
+        if k < 2:
+            raise ValueError(f"Need at least 2 operators, got k={k}")
+
+        # Sample indices without replacement
+        indices = rng.choice(self.L, size=k, replace=False)
+
+        # Return corresponding operators
+        return [self.operators[i] for i in indices]
+
+
 class GeometricTwoLocal:
     """
     Gaussian Geo-Local (GEO2) ensemble on a rectangular lattice.
@@ -253,13 +360,20 @@ class GeometricTwoLocal:
 
         return basis
 
-    def sample_lambda(self, rng: np.random.RandomState) -> np.ndarray:
+    def sample_lambda(self, rng) -> np.ndarray:
         """
         Sample Gaussian coefficients for GEO2 Hamiltonian.
 
         Returns: λ = g/√L where g ~ N(0, I_L), so E[λ_a^2] = 1/L.
+
+        Args:
+            rng: numpy random Generator or RandomState
         """
-        return rng.randn(self.L) / np.sqrt(self.L)
+        # Support both old and new numpy random APIs
+        if hasattr(rng, 'standard_normal'):
+            return rng.standard_normal(self.L) / np.sqrt(self.L)
+        else:
+            return rng.randn(self.L) / np.sqrt(self.L)
 
     def sample_hamiltonian(self, rng: np.random.RandomState) -> qutip.Qobj:
         """Generate one GEO2 Hamiltonian instance: H = Σ_a λ_a H_a."""
@@ -307,6 +421,7 @@ ENSEMBLES = {
     "GOE": "GOE",
     "GUE": "GUE",
     "GEO2": "GEO2",
+    "canonical": "canonical",
 }
 
 
@@ -319,9 +434,11 @@ def random_hamiltonian_ensemble(
     Args:
         dim: Hilbert space dimension
         k: Number of Hamiltonians to generate
-        ensemble: "GOE", "GUE", or "GEO2"
+        ensemble: "GOE", "GUE", "GEO2", or "canonical"
         seed: Random seed (uses settings.SEED if None)
-        **kwargs: Ensemble-specific parameters (for GEO2: nx, ny, periodic)
+        **kwargs: Ensemble-specific parameters
+            - For GEO2: nx, ny, periodic
+            - For canonical: include_identity (default True)
 
     Returns:
         List of k random Hermitian operators
@@ -347,6 +464,7 @@ def random_hamiltonian_ensemble(
         nx = kwargs.get("nx")
         ny = kwargs.get("ny")
         periodic = kwargs.get("periodic", False)
+        geo2_optimize_weights = kwargs.get("geo2_optimize_weights", False)
 
         if nx is None or ny is None:
             raise ValueError("GEO2 ensemble requires 'nx' and 'ny' parameters")
@@ -363,12 +481,40 @@ def random_hamiltonian_ensemble(
         # Create GEO2 instance (builds basis once)
         geo2 = GeometricTwoLocal(nx, ny, periodic, backend="sparse")
 
-        # Sample k Hamiltonians from the basis
-        for i in range(k):
-            h_seed = rng.randint(0, 2**31 - 1)
-            h_rng = setup_rng(h_seed)
-            H = geo2.sample_hamiltonian(h_rng)
-            hamiltonians.append(H)
+        if geo2_optimize_weights:
+            # Approach 1: Sample K basis operators (weights optimized by maximize_* functions)
+            # Similar to canonical ensemble - select without replacement
+            if k > geo2.L:
+                raise ValueError(
+                    f"Cannot sample {k} operators from GEO2 basis of size {geo2.L} "
+                    f"(lattice {nx}×{ny}). Maximum k = {geo2.L}."
+                )
+            indices = rng.choice(geo2.L, size=k, replace=False)
+            hamiltonians = [geo2.Hs[i] for i in indices]
+        else:
+            # Approach 2a: Sample k Hamiltonians with fixed random weights (default, arXiv definition)
+            for i in range(k):
+                h_seed = rng.randint(0, 2**31 - 1)
+                h_rng = setup_rng(h_seed)
+                H = geo2.sample_hamiltonian(h_rng)
+                hamiltonians.append(H)
+
+    elif ensemble == "canonical":
+        # Canonical basis: sample k operators from {X_jk, Y_jk, Z_j, I}
+        include_identity = kwargs.get("include_identity", True)
+
+        # Create canonical basis instance (builds all d² operators)
+        canonical = CanonicalBasis(dim, include_identity=include_identity)
+
+        # Validate k doesn't exceed basis size
+        if k > canonical.L:
+            raise ValueError(
+                f"Cannot sample {k} operators from canonical basis of size {canonical.L} "
+                f"(dimension {dim}). Maximum k = {canonical.L}."
+            )
+
+        # Sample k operators without replacement
+        hamiltonians = canonical.sample_k_operators(k, rng)
 
     else:
         # GOE or GUE
@@ -406,14 +552,11 @@ def random_states(n: int, dim: int, seed: Optional[int] = None) -> List[qutip.Qo
 
     states = []
     for i in range(n):
-        # Set numpy seed before each qutip call for reproducibility
         state_seed = rng.randint(0, 2**31 - 1)
-        np.random.seed(state_seed)
-        state = qutip.rand_ket(dim)
+        # QuTiP 5.x ignores np.random.seed(); use seed= parameter directly
+        state = qutip.rand_ket(dim, seed=state_seed)
         states.append(state)
 
-    # Restore original seeding
-    np.random.seed(seed)
     return states
 
 

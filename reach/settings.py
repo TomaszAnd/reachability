@@ -52,6 +52,116 @@ DEFAULT_MAXITER: int = 200
 #: Default function tolerance for optimization convergence
 DEFAULT_FTOL: float = 1e-8
 
+# ----------------------------------------------------------------------------
+# Ensemble-Specific Optimization Settings
+# ----------------------------------------------------------------------------
+
+#: GEO2-specific optimization settings
+#: Previous "aggressive" settings (maxiter=20, restarts=1) caused 70% false-unreachable
+#: rate on provably reachable targets. See scripts/audit/AUDIT_FINDINGS.md for details.
+#: Settings below achieve ≤1% false-unreachable rate across d=16..32 (sweep 2026-01-27).
+#: With analytical gradient (spectral_overlap_with_grad), these are ~5-11× faster than
+#: the old finite-difference approach at equivalent maxiter.
+GEO2_RESTARTS: int = 3      # 3 restarts needed for d=16 (K=13); d=32 works with 1
+GEO2_MAXITER: int = 100     # 75 minimum, 100 for safety at d=32 with low K
+GEO2_FTOL: float = 1e-6     # Tighter than before (1e-4) for reliable convergence
+
+# ----------------------------------------------------------------------------
+# Production Settings (for fair cross-ensemble comparison)
+# ----------------------------------------------------------------------------
+#: Production restarts (same for all ensembles)
+PRODUCTION_RESTARTS: int = 3
+
+#: Production maxiter base value (adapted by dimension)
+PRODUCTION_MAXITER: int = 150
+
+#: Production ftol
+PRODUCTION_FTOL: float = 1e-6
+
+
+def get_optimization_settings(ensemble: str) -> dict:
+    """
+    Get ensemble-specific optimization settings.
+
+    Parameters
+    ----------
+    ensemble : str
+        Ensemble type ('GUE', 'GOE', 'canonical', 'GEO2')
+
+    Returns
+    -------
+    dict
+        Dictionary with keys: 'restarts', 'maxiter', 'ftol', 'method', 'bounds'
+
+    Notes
+    -----
+    GEO2 uses maxiter=100, restarts=3 based on sweep results (2026-01-27).
+    With analytical gradient, this achieves 0% false-unreachable rate on
+    provably reachable targets at d=16 (K=13) and d=32 (K=51).
+    See scripts/audit/AUDIT_FINDINGS.md for full analysis.
+    """
+    if ensemble.upper() == 'GEO2':
+        return {
+            'restarts': GEO2_RESTARTS,
+            'maxiter': GEO2_MAXITER,
+            'ftol': GEO2_FTOL,
+            'method': DEFAULT_METHOD,
+            'bounds': DEFAULT_BOUNDS,
+        }
+    else:
+        # GUE, GOE, canonical use default settings
+        return {
+            'restarts': DEFAULT_RESTARTS,
+            'maxiter': DEFAULT_MAXITER,
+            'ftol': DEFAULT_FTOL,
+            'method': DEFAULT_METHOD,
+            'bounds': DEFAULT_BOUNDS,
+        }
+
+
+def get_production_settings(d: int, ensemble: str = 'GEO2') -> dict:
+    """
+    Get production-quality optimization settings with dimension-adaptive maxiter.
+
+    These settings ensure ≤1% false-unreachable rate across all tested
+    configurations. Uses analytical gradient for speed.
+
+    Parameters
+    ----------
+    d : int
+        Hilbert space dimension
+    ensemble : str
+        Ensemble type
+
+    Returns
+    -------
+    dict
+        Dictionary with keys: 'restarts', 'maxiter', 'ftol', 'method', 'bounds'
+
+    Notes
+    -----
+    Maxiter scales with dimension to accommodate larger K = O(d²) parameter spaces:
+    - d ≤ 16: maxiter=100 (K ≤ 13 at ρ=0.05)
+    - d ≤ 32: maxiter=100 (K ≤ 51 at ρ=0.05)
+    - d ≤ 64: maxiter=150 (K ≤ 205 at ρ=0.05)
+    - d > 64: maxiter=200 (safety margin for very large K)
+    """
+    if d <= 32:
+        maxiter = 100
+    elif d <= 64:
+        maxiter = PRODUCTION_MAXITER  # 150
+    else:
+        maxiter = 200
+
+    return {
+        'restarts': PRODUCTION_RESTARTS,
+        'maxiter': maxiter,
+        'ftol': PRODUCTION_FTOL,
+        'method': DEFAULT_METHOD,
+        'bounds': DEFAULT_BOUNDS,
+    }
+
+
 # ============================================================================
 # ANALYSIS DEFAULTS
 # ============================================================================

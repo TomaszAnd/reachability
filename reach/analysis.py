@@ -46,8 +46,170 @@ from scipy.interpolate import RectBivariateSpline
 from scipy.ndimage import gaussian_filter
 
 from . import mathematics, models, optimize, settings
+from .logging_utils import EnhancedDataLogger
 
 logger = logging.getLogger(__name__)
+
+
+def continuous_krylov_vs_spectral_comparison(
+    d: int,
+    k_values: List[int],
+    ensemble: str,
+    nks: int = 50,
+    nst: int = 20,
+    m: Optional[int] = None,
+    method: str = settings.DEFAULT_METHOD,
+    maxiter: int = settings.DEFAULT_MAXITER,
+    seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Compare continuous Krylov scores with spectral overlap scores.
+
+    This function computes both R*_Krylov (optimized Krylov score) and S*
+    (optimized spectral overlap) for the same set of Hamiltonians and states,
+    enabling direct comparison between the two continuous criteria.
+
+    Args:
+        d: Hilbert space dimension
+        k_values: List of K values (number of Hamiltonians) to test
+        ensemble: "GOE" or "GUE"
+        nks: Number of Hamiltonian samples per K
+        nst: Number of target states per Hamiltonian
+        m: Krylov rank (default: d)
+        method: Optimization method
+        maxiter: Maximum iterations for optimization
+        seed: Random seed
+
+    Returns:
+        Dictionary containing:
+        - 'k_values': Array of K values
+        - 'krylov_scores': List of arrays of R* values (one array per K)
+        - 'spectral_scores': List of arrays of S* values (one array per K)
+        - 'krylov_mean': Array of mean R* per K
+        - 'krylov_std': Array of std R* per K
+        - 'spectral_mean': Array of mean S* per K
+        - 'spectral_std': Array of std S* per K
+        - 'correlation': Array of correlation coefficients per K
+    """
+    if seed is None:
+        seed = settings.SEED
+    rng = models.setup_rng(seed)
+
+    if m is None:
+        m = d
+
+    logger.info(
+        f"Continuous Krylov vs Spectral comparison: d={d}, K={k_values}, "
+        f"ensemble={ensemble}, m={m}, trials={nks * nst}"
+    )
+
+    results = {
+        "k_values": np.array(k_values),
+        "krylov_scores": [],
+        "spectral_scores": [],
+        "krylov_mean": [],
+        "krylov_std": [],
+        "spectral_mean": [],
+        "spectral_std": [],
+        "correlation": [],
+    }
+
+    for K in k_values:
+        if K < 2 or K >= d:
+            logger.warning(f"Skipping K={K} (invalid range)")
+            results["krylov_scores"].append(np.array([]))
+            results["spectral_scores"].append(np.array([]))
+            results["krylov_mean"].append(0.0)
+            results["krylov_std"].append(0.0)
+            results["spectral_mean"].append(0.0)
+            results["spectral_std"].append(0.0)
+            results["correlation"].append(0.0)
+            continue
+
+        logger.info(f"Computing for K={K}, m={min(m, K)}")
+
+        krylov_scores = []
+        spectral_scores = []
+
+        # Use m = min(m, K) for consistency
+        m_actual = min(m, K)
+
+        for _ in range(nks):
+            # Generate random Hamiltonian ensemble
+            hams = models.random_hamiltonian_ensemble(d, K, ensemble, seed=rng.randint(0, 2**31 - 1))
+
+            # Initial state
+            psi = models.fock_state(d, 0)
+
+            # Sample random target states
+            targets = models.random_states(nst, d, seed=rng.randint(0, 2**31 - 1))
+
+            for phi in targets:
+                # Optimize Krylov score
+                krylov_result = optimize.maximize_krylov_score(
+                    psi,
+                    phi,
+                    hams,
+                    m=m_actual,
+                    method=method,
+                    restarts=settings.DEFAULT_RESTARTS,
+                    maxiter=maxiter,
+                    seed=rng.randint(0, 2**31 - 1),
+                )
+                krylov_scores.append(krylov_result["best_value"])
+
+                # Optimize spectral overlap
+                spectral_result = optimize.maximize_spectral_overlap(
+                    psi,
+                    phi,
+                    hams,
+                    method=method,
+                    restarts=settings.DEFAULT_RESTARTS,
+                    maxiter=maxiter,
+                    seed=rng.randint(0, 2**31 - 1),
+                )
+                spectral_scores.append(spectral_result["best_value"])
+
+        # Convert to arrays
+        krylov_arr = np.array(krylov_scores)
+        spectral_arr = np.array(spectral_scores)
+
+        # Compute statistics
+        krylov_mean = float(np.mean(krylov_arr))
+        krylov_std = float(np.std(krylov_arr))
+        spectral_mean = float(np.mean(spectral_arr))
+        spectral_std = float(np.std(spectral_arr))
+
+        # Compute correlation
+        if len(krylov_arr) > 1:
+            correlation = float(np.corrcoef(krylov_arr, spectral_arr)[0, 1])
+        else:
+            correlation = 0.0
+
+        # Store results
+        results["krylov_scores"].append(krylov_arr)
+        results["spectral_scores"].append(spectral_arr)
+        results["krylov_mean"].append(krylov_mean)
+        results["krylov_std"].append(krylov_std)
+        results["spectral_mean"].append(spectral_mean)
+        results["spectral_std"].append(spectral_std)
+        results["correlation"].append(correlation)
+
+        logger.info(
+            f"  K={K}: R*={krylov_mean:.4f}±{krylov_std:.4f}, "
+            f"S*={spectral_mean:.4f}±{spectral_std:.4f}, "
+            f"corr={correlation:.4f}"
+        )
+
+    # Convert lists to arrays
+    results["krylov_mean"] = np.array(results["krylov_mean"])
+    results["krylov_std"] = np.array(results["krylov_std"])
+    results["spectral_mean"] = np.array(results["spectral_mean"])
+    results["spectral_std"] = np.array(results["spectral_std"])
+    results["correlation"] = np.array(results["correlation"])
+
+    logger.info("Continuous Krylov vs Spectral comparison complete")
+    return results
 
 
 def monte_carlo_unreachability(
@@ -1240,6 +1402,7 @@ def monte_carlo_unreachability_vs_K_three(
     probs_spectral, errs_spectral = [], []
     probs_old, errs_old = [], []
     mean_overlaps_spectral, sem_overlaps_spectral = [], []
+    mean_overlaps_krylov, sem_overlaps_krylov = [], []  # NEW: Krylov score statistics
 
     for K in k_values:
         if K >= d:
@@ -1252,6 +1415,8 @@ def monte_carlo_unreachability_vs_K_three(
             errs_old.append(0.0)
             mean_overlaps_spectral.append(0.0)
             sem_overlaps_spectral.append(0.0)
+            mean_overlaps_krylov.append(0.0)
+            sem_overlaps_krylov.append(0.0)
             continue
 
         # Determine Krylov rank m for this K
@@ -1265,11 +1430,13 @@ def monte_carlo_unreachability_vs_K_three(
 
         logger.info(f"  Computing for K={K} (Krylov m={m})")
 
-        # Counters for each criterion
-        unreach_krylov, unreach_spectral, unreach_old = 0, 0, 0
+        # Counters for criteria
+        unreach_old = 0
+        unreach_spectral = 0  # Counted inline for spectral
         total_count = 0
-        # Collect spectral best values for statistics
+        # Collect best values for τ-dependent criteria (spectral, krylov)
         spectral_best_values = []
+        krylov_best_values = []
 
         for _ in range(nks):
             # Generate random Hamiltonian ensemble
@@ -1306,13 +1473,18 @@ def monte_carlo_unreachability_vs_K_three(
             energy_sq_zero = expect_array_of_operators(hs_anticomms, psi)
 
             for phi in targets:
-                # --- Krylov criterion ---
-                lambdas = rng.uniform(-1.0, 1.0, K)
-                H_combined = sum(lam * H for lam, H in zip(lambdas, hams))
-                H_matrix = H_combined.full() if hasattr(H_combined, "full") else H_combined
-
-                if mathematics.is_unreachable_krylov(H_matrix, psi, phi, m, rank_tol=rank_tol):
-                    unreach_krylov += 1
+                # --- Continuous Krylov criterion (optimized over λ, τ-dependent) ---
+                krylov_result = optimize.maximize_krylov_score(
+                    psi,
+                    phi,
+                    hams,
+                    m=m,
+                    method=method,
+                    restarts=settings.DEFAULT_RESTARTS,
+                    maxiter=maxiter,
+                    seed=rng.randint(0, 2**31 - 1),
+                )
+                krylov_best_values.append(krylov_result["best_value"])
 
                 # --- Spectral overlap criterion ---
                 result = optimize.maximize_spectral_overlap(
@@ -1344,17 +1516,23 @@ def monte_carlo_unreachability_vs_K_three(
 
                 total_count += 1
 
-        # Compute probabilities and SEMs
+        # Compute probabilities and SEMs for τ-dependent criteria (krylov, spectral)
+        # Threshold Krylov scores at tau
+        krylov_arr = np.array(krylov_best_values)
+        unreach_krylov = np.sum(krylov_arr < tau)
         p_krylov = max(settings.DISPLAY_FLOOR, unreach_krylov / total_count if total_count > 0 else 0.0)
+        sem_krylov = mathematics.compute_binomial_sem(p_krylov, total_count) if total_count > 0 else 0.0
+
+        # Threshold Spectral scores at tau (already counted inline, just compute probability)
         p_spectral = max(
             settings.DISPLAY_FLOOR, unreach_spectral / total_count if total_count > 0 else 0.0
         )
-        p_old = max(settings.DISPLAY_FLOOR, unreach_old / total_count if total_count > 0 else 0.0)
-
-        sem_krylov = mathematics.compute_binomial_sem(p_krylov, total_count) if total_count > 0 else 0.0
         sem_spectral = (
             mathematics.compute_binomial_sem(p_spectral, total_count) if total_count > 0 else 0.0
         )
+
+        # Moment criterion (τ-independent)
+        p_old = max(settings.DISPLAY_FLOOR, unreach_old / total_count if total_count > 0 else 0.0)
         sem_old = mathematics.compute_binomial_sem(p_old, total_count) if total_count > 0 else 0.0
 
         probs_krylov.append(p_krylov)
@@ -1367,19 +1545,31 @@ def monte_carlo_unreachability_vs_K_three(
         # Compute mean and SEM of spectral best overlap values
         if spectral_best_values:
             overlap_arr = np.array(spectral_best_values)
-            mean_overlap = float(np.mean(overlap_arr))
-            sem_overlap = float(np.std(overlap_arr, ddof=1) / np.sqrt(len(overlap_arr)))
+            mean_overlap_spectral = float(np.mean(overlap_arr))
+            sem_overlap_spectral = float(np.std(overlap_arr, ddof=1) / np.sqrt(len(overlap_arr)))
         else:
-            mean_overlap = 0.0
-            sem_overlap = 0.0
-        mean_overlaps_spectral.append(mean_overlap)
-        sem_overlaps_spectral.append(sem_overlap)
+            mean_overlap_spectral = 0.0
+            sem_overlap_spectral = 0.0
+        mean_overlaps_spectral.append(mean_overlap_spectral)
+        sem_overlaps_spectral.append(sem_overlap_spectral)
+
+        # Compute mean and SEM of Krylov best scores (NEW)
+        if krylov_best_values:
+            krylov_score_arr = np.array(krylov_best_values)
+            mean_overlap_krylov = float(np.mean(krylov_score_arr))
+            sem_overlap_krylov = float(np.std(krylov_score_arr, ddof=1) / np.sqrt(len(krylov_score_arr)))
+        else:
+            mean_overlap_krylov = 0.0
+            sem_overlap_krylov = 0.0
+        mean_overlaps_krylov.append(mean_overlap_krylov)
+        sem_overlaps_krylov.append(sem_overlap_krylov)
 
         logger.info(
             f"    K={K}: P_krylov={p_krylov:.4f}±{sem_krylov:.4f}, "
             f"P_spectral={p_spectral:.4f}±{sem_spectral:.4f}, "
             f"P_old={p_old:.4f}±{sem_old:.4f}, "
-            f"mean(S*)={mean_overlap:.4f}±{sem_overlap:.4f}"
+            f"mean(S*)={mean_overlap_spectral:.4f}±{sem_overlap_spectral:.4f}, "
+            f"mean(R*)={mean_overlap_krylov:.4f}±{sem_overlap_krylov:.4f}"
         )
 
     # Store results
@@ -1391,6 +1581,8 @@ def monte_carlo_unreachability_vs_K_three(
     results["err_old"] = np.array(errs_old)
     results["mean_best_overlap_spectral"] = np.array(mean_overlaps_spectral)
     results["sem_best_overlap_spectral"] = np.array(sem_overlaps_spectral)
+    results["mean_best_overlap_krylov"] = np.array(mean_overlaps_krylov)  # NEW
+    results["sem_best_overlap_krylov"] = np.array(sem_overlaps_krylov)  # NEW
 
     logger.info("Three-criteria K-sweep complete")
     return results
@@ -1409,6 +1601,8 @@ def monte_carlo_unreachability_vs_density(
     maxiter: int = settings.DEFAULT_MAXITER,
     seed: Optional[int] = None,
     rank_tol: float = settings.KRYLOV_RANK_TOL,
+    data_logger: Optional[EnhancedDataLogger] = None,
+    optimize_lambda: bool = True,
     **ensemble_params,
 ) -> Dict[str, Any]:
     """
@@ -1435,6 +1629,9 @@ def monte_carlo_unreachability_vs_density(
         maxiter: Max iterations for spectral optimization
         seed: Random seed
         rank_tol: Rank tolerance for Krylov criterion
+        data_logger: Optional EnhancedDataLogger for logging raw trial data
+        optimize_lambda: If True (default), optimize λ to maximize Spectral/Krylov criteria.
+                        If False, use fixed random λ ~ N(0, 1/√K) without optimization.
         **ensemble_params: Ensemble-specific parameters (for GEO2: nx, ny, periodic)
 
     Returns:
@@ -1468,6 +1665,15 @@ def monte_carlo_unreachability_vs_density(
         f"taus={taus}, {ensemble}, k_cap={k_cap}"
     )
 
+    # Get ensemble-specific optimization settings
+    opt_settings = settings.get_optimization_settings(ensemble)
+    opt_restarts = opt_settings['restarts']
+    opt_maxiter = opt_settings['maxiter']
+    logger.info(
+        f"Using ensemble-specific settings for {ensemble}: "
+        f"restarts={opt_restarts}, maxiter={opt_maxiter}"
+    )
+
     results = {"dims": dims, "taus": taus, "rho_grid": rho_grid}
 
     # For each dimension
@@ -1489,11 +1695,15 @@ def monte_carlo_unreachability_vs_density(
         for K in k_values:
             logger.info(f"  Computing MC for d={d}, K={K}")
 
-            # Counters for each criterion
-            unreach_krylov, unreach_old = 0, 0
+            # Counters for τ-independent criteria (moment only)
+            unreach_old = 0
             total_count = 0
-            # Collect spectral best values for multi-τ thresholding
+            # Collect best values for τ-dependent criteria (spectral, krylov)
             spectral_best_values = []
+            krylov_best_values = []
+
+            # Trial index for logging
+            trial_idx = 0
 
             for _ in range(nks):
                 # Generate random Hamiltonian ensemble
@@ -1531,46 +1741,88 @@ def monte_carlo_unreachability_vs_density(
                 energy_sq_zero = expect_array_of_operators(hs_anticomms, psi)
 
                 for phi in targets:
-                    # Krylov criterion (use m = min(K, d))
+                    # Continuous Krylov criterion (τ-dependent)
                     m_krylov = min(K, d)
-                    lambdas = rng.uniform(-1.0, 1.0, K)
-                    H_combined = sum(lam * H for lam, H in zip(lambdas, hams))
-                    H_matrix = H_combined.full() if hasattr(H_combined, "full") else H_combined
+                    if optimize_lambda:
+                        # Optimize λ to maximize Krylov score
+                        krylov_result = optimize.maximize_krylov_score(
+                            psi,
+                            phi,
+                            hams,
+                            m=m_krylov,
+                            method=method,
+                            restarts=opt_restarts,
+                            maxiter=opt_maxiter,
+                            seed=rng.randint(0, 2**31 - 1),
+                        )
+                        krylov_best_values.append(krylov_result["best_value"])
 
-                    if mathematics.is_unreachable_krylov(H_matrix, psi, phi, m_krylov, rank_tol=rank_tol):
-                        unreach_krylov += 1
+                        # Optimize λ to maximize spectral overlap
+                        result = optimize.maximize_spectral_overlap(
+                            psi,
+                            phi,
+                            hams,
+                            method=method,
+                            restarts=opt_restarts,
+                            maxiter=opt_maxiter,
+                            seed=rng.randint(0, 2**31 - 1),
+                        )
+                        spectral_best_values.append(result["best_value"])
+                    else:
+                        # Use same fixed random λ for fair comparison
+                        lambda_fixed = rng.randn(K) / np.sqrt(K)
+                        krylov_score_fixed = mathematics.krylov_score(
+                            lambda_fixed, psi, phi, hams, m=m_krylov
+                        )
+                        krylov_best_values.append(krylov_score_fixed)
 
-                    # Spectral overlap criterion
-                    result = optimize.maximize_spectral_overlap(
-                        psi,
-                        phi,
-                        hams,
-                        method=method,
-                        restarts=settings.DEFAULT_RESTARTS,
-                        maxiter=maxiter,
-                        seed=rng.randint(0, 2**31 - 1),
-                    )
-                    spectral_best_values.append(result["best_value"])
+                        spectral_overlap_fixed = mathematics.spectral_overlap(
+                            lambda_fixed, psi, phi, hams
+                        )
+                        spectral_best_values.append(spectral_overlap_fixed)
 
                     # Moment criterion
                     energies_state = expect_array_of_operators(hams, phi)
                     diff = energies_state - energies_zero
                     kernel = null_space(diff.reshape(1, -1))
 
+                    # Initialize moment data for logging
+                    moment_eigenvalues = np.array([])
+                    moment_definite = False
+
                     if kernel.size > 0:
                         energy_sq_state = expect_array_of_operators(hs_anticomms, phi)
                         m_final = kernel.T @ (energy_sq_state - energy_sq_zero) @ kernel
-                        if check_eigenvalues(m_final):
+
+                        # Compute eigenvalues for logging
+                        moment_eigenvalues = np.linalg.eigvalsh(m_final)
+                        moment_definite = check_eigenvalues(m_final)
+
+                        if moment_definite:
                             unreach_old += 1
 
                     total_count += 1
 
+                    # Log trial data if logger is provided
+                    if data_logger is not None:
+                        data_logger.log_trial(
+                            d=d,
+                            K=K,
+                            trial_idx=trial_idx,
+                            spectral_score=spectral_best_values[-1],  # Just added
+                            krylov_score=krylov_best_values[-1],       # Just added
+                            moment_eigenvalues=moment_eigenvalues,
+                            moment_definite=moment_definite,
+                        )
+
+                    trial_idx += 1
+
             # Store raw results for this K
             raw_data_by_k[K] = {
                 "total_count": total_count,
-                "unreach_krylov": unreach_krylov,
-                "unreach_old": unreach_old,
-                "spectral_best_values": np.array(spectral_best_values),
+                "unreach_old": unreach_old,  # Moment criterion (τ-independent)
+                "spectral_best_values": np.array(spectral_best_values),  # Spectral (τ-dependent)
+                "krylov_best_values": np.array(krylov_best_values),  # Krylov (τ-dependent, NEW)
             }
 
             logger.info(f"    Collected {total_count} trials for (d={d}, K={K})")
@@ -1598,8 +1850,16 @@ def monte_carlo_unreachability_vs_density(
                         sem_overlap_list.append(sem_overlap)
 
                     elif criterion == "krylov":
-                        unreach = data["unreach_krylov"]
+                        # Threshold Krylov best values at this tau (NEW: τ-dependent)
+                        best_vals = data["krylov_best_values"]
+                        unreach = np.sum(best_vals < tau)
                         p = unreach / total if total > 0 else 0.0
+
+                        # Compute mean and SEM of Krylov scores
+                        mean_overlap = float(np.mean(best_vals))
+                        sem_overlap = float(np.std(best_vals, ddof=1) / np.sqrt(len(best_vals))) if len(best_vals) > 1 else 0.0
+                        mean_overlap_list.append(mean_overlap)
+                        sem_overlap_list.append(sem_overlap)
 
                     elif criterion == "moment":
                         unreach = data["unreach_old"]
@@ -1622,7 +1882,8 @@ def monte_carlo_unreachability_vs_density(
                     "err": np.array(err_list),
                 }
 
-                if criterion == "spectral":
+                # Store mean/SEM for τ-dependent criteria (spectral, krylov)
+                if criterion in ["spectral", "krylov"]:
                     results[key]["mean_overlap"] = np.array(mean_overlap_list)
                     results[key]["sem_overlap"] = np.array(sem_overlap_list)
 
@@ -1798,7 +2059,7 @@ def monte_carlo_unreachability_vs_K_multi_tau(
         }
 
     # Process old and krylov (tau-independent)
-    for criterion in ["moment", "krylov"]:
+    for criterion in ["old", "krylov"]:
         p_list, err_list = [], []
 
         for K in k_values:

@@ -1159,7 +1159,7 @@ def plot_rank_comparison_with_inset(
     # Plot old and new criteria on main axes
     for idx, d in enumerate(dims):
         # Old criterion (τ-free)
-        points_old = [(k, p) for (dim, k), p in old_results.items() if dim == d]
+        points_old = [(k, p) for (dim, k), p in moment_results.items() if dim == d]
         if points_old:
             points_old.sort(key=lambda x: x[0])
             ks, ps = zip(*points_old)
@@ -1176,7 +1176,7 @@ def plot_rank_comparison_with_inset(
             )
 
         # New criterion (uses τ)
-        points_new = [(k, p) for (dim, k), p in new_results.items() if dim == d]
+        points_new = [(k, p) for (dim, k), p in spectral_results.items() if dim == d]
         if points_new:
             points_new.sort(key=lambda x: x[0])
             ks, ps = zip(*points_new)
@@ -1195,7 +1195,7 @@ def plot_rank_comparison_with_inset(
             )
 
     # Configure main axes
-    ks_all = sorted({k for (_, k) in old_results.keys()} | {k for (_, k) in new_results.keys()})
+    ks_all = sorted({k for (_, k) in moment_results.keys()} | {k for (_, k) in spectral_results.keys()})
     ax.set_xlabel("k (Number of Hamiltonians)", fontsize=12)
     ax.set_ylabel("log₁₀(P(detected unreachability))", fontsize=12)
     ax.set_title(f"Old vs New Criterion with Zoom — {ensemble} (τ={tau:.3f})", fontsize=14)
@@ -1692,7 +1692,7 @@ def plot_rank_comparison_rescaled(
     # Plot old and new criteria
     for idx, d in enumerate(dims):
         # Old criterion (τ-free)
-        points_old = [(k, p) for (dim, k), p in old_results.items() if dim == d]
+        points_old = [(k, p) for (dim, k), p in moment_results.items() if dim == d]
         if points_old:
             points_old.sort(key=lambda x: x[0])
             ks, ps = zip(*points_old)
@@ -1740,7 +1740,7 @@ def plot_rank_comparison_rescaled(
                            linewidth=2, marker="o", markersize=6, linestyle="-")
 
         # New criterion (uses τ)
-        points_new = [(k, p) for (dim, k), p in new_results.items() if dim == d]
+        points_new = [(k, p) for (dim, k), p in spectral_results.items() if dim == d]
         if points_new:
             points_new.sort(key=lambda x: x[0])
             ks, ps = zip(*points_new)
@@ -1796,7 +1796,7 @@ def plot_rank_comparison_rescaled(
         )
 
     # Configure axes
-    ks_all = sorted({k for (_, k) in old_results.keys()} | {k for (_, k) in new_results.keys()})
+    ks_all = sorted({k for (_, k) in moment_results.keys()} | {k for (_, k) in spectral_results.keys()})
     ax.set_xlabel("k (Number of Hamiltonians)", fontsize=12)
     ax.set_ylabel("log₁₀(P(detected unreachability))", fontsize=12)
     ax.set_title(f"Old vs New Criterion — {ensemble} (τ={tau:.3f})", fontsize=14)

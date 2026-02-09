@@ -161,6 +161,30 @@ python -m reach.cli plot-from-csv \
 
 ---
 
+## Reproducing Publication Figures
+
+Generate all v7 dual-version publication figures from existing data:
+
+```bash
+python scripts/generate_publication_dual_versions.py 2>&1 | tee logs/dual_version_generation.log
+```
+
+**Output**: 8 publication-quality figures in `fig/publication/`:
+- `final_summary_3panel_v7_{exp,pow2}.png` - 3-panel decay curves (Moment, Spectral, Krylov)
+- `combined_criteria_d26_v7_{exp,pow2}.png` - All three criteria at d=26
+- `Kc_vs_d_v7_{exp,pow2}.png` - Critical K scaling with dimension
+- `linearized_fits_v7_{exp,pow2}.png` - Linearized fits (ln vs log₂)
+
+**Dual-version support**:
+- **EXP version**: P(ρ) = exp(-α d² (ρ - ρ_c)), linearized as ln(P)
+- **POW2 version**: P(ρ) = 2^(-ρ/ρ_c), linearized as log₂(P)
+
+**Data sources**: See [DATA_PROVENANCE.md](DATA_PROVENANCE.md) for complete data lineage, merging strategies, and access patterns.
+
+**Reproduction details**: See [CLAUDE.md](CLAUDE.md#reproducing-publication-figures) for step-by-step workflow.
+
+---
+
 ## Production Runs
 
 ### Fast Demo (~5-10 minutes)
@@ -461,6 +485,72 @@ We estimate probabilities via Monte Carlo sampling over random ensembles:
 
 ---
 
+## Data Quality and Methodology
+
+### Physical Data Treatment (No Artificial Clipping)
+
+This project uses statistically rigorous treatment of probability data:
+
+1. **Wilson Score Intervals**: Boundary values (P=0, P=1) are treated as genuine
+   physical outcomes with proper binomial uncertainty, not clipped to arbitrary ε.
+
+2. **Transition-Region Fitting**: Linearized fits (exponential, Fermi-Dirac) use only
+   informative transition points (0 < k < N), excluding boundary points that provide
+   no slope information.
+
+3. **Quality Metrics**: Every fit reports:
+   - N_transition: Number of informative points used
+   - Frac_transition: Fraction of data in transition region
+   - Quality flag: "good" (≥10 pts, ≥20%), "marginal" (≥5 pts, ≥10%), or "insufficient"
+
+### Linearized Fits for Functional Form Validation
+
+The `scripts/plot_linearized_physical.py` script validates theoretical predictions:
+
+**Panel (a): Moment Criterion - Exponential Decay**
+```
+P(K) = exp(-α(K - K_c))  →  log(P) = -α·K + α·K_c
+```
+Linear fit of log(P) vs K extracts critical control density K_c and decay rate α.
+
+**Panel (b): Spectral Criterion - Fermi-Dirac**
+```
+P(K) = 1/(1 + exp((K - K_c)/Δ))  →  logit(P) = -K/Δ + K_c/Δ
+```
+Linear fit of logit(P) vs K extracts transition midpoint K_c and width Δ.
+
+**Panel (c): Krylov Criterion - Step-like Transition**
+```
+P(K) = 1/(1 + exp((K - K_c)/Δ))  with Δ → 0
+```
+Near-discontinuous transition requires dense sampling (ΔK ~ Δ/3 ≈ 0.2-0.3).
+
+**Typical Results (τ=0.99)**:
+- Moment: 90-95% transition points, R² > 0.95 (excellent quality)
+- Spectral: 50-60% transition points, R² > 0.85 (good quality)
+- Krylov: 7-13% transition points, R² variable (insufficient data, needs denser K sampling)
+
+### Quality-Aware Experimental Design
+
+**Problem**: Krylov has sharp transitions (Δ ≈ 0.5-1.5), requiring dense sampling near K_c
+to capture the transition region.
+
+**Solution**: Use adaptive K grids with spacing ~ Δ/3:
+```python
+# Coarse grid for initial K_c estimate
+K_coarse = [2, 4, 6, 8, 10, 12, 14]
+
+# Dense grid near estimated K_c (e.g., K_c ≈ 10 for d=10)
+K_dense = np.arange(8, 12, 0.3)  # Δ/3 ≈ 0.5/3 ≈ 0.17
+
+# Combine for comprehensive coverage
+K_adaptive = sorted(set(K_coarse) | set(K_dense))
+```
+
+See `docs/clipping_methodology.md` for full mathematical derivations and alternative approaches.
+
+---
+
 ## Practical Usage Examples
 
 ### Example 1: Quick Single-Criterion Test
@@ -613,15 +703,20 @@ python -m reach.cli --nx 3 --ny 3 three-criteria-vs-density \
 
 | File | Purpose |
 |------|---------|
-| `cli.py` | Command-line interface, subcommands, argument parsing |
-| `analysis.py` | Monte Carlo loops, density/K sweeps (pure computation) |
-| `viz.py` | Plot functions for computed data (pure rendering) |
-| `viz_csv.py` | Plot functions for CSV data (streaming/partial results) |
+| `cli.py` | Command-line interface, 13 subcommands, argument parsing |
+| `analysis.py` | Monte Carlo loops, density/K sweeps (pure computation, 17 functions) |
+| `viz.py` | Plot functions for computed data and CSV (pure rendering) |
+| `mathematics.py` | Eigendecomposition, spectral overlap, Krylov score, analytical gradients |
+| `optimize.py` | Multi-restart L-BFGS-B maximization of S(λ) and R(λ) |
+| `models.py` | GOE/GUE/GEO2/Canonical ensemble generation, random states |
+| `parallel.py` | Parallel Monte Carlo evaluation using joblib |
+| `adaptive_sampling.py` | Adaptive ρ sampling near phase transitions |
 | `logging_utils.py` | CSV logging, `StreamingCSVWriter` class |
-| `models.py` | GOE/GUE ensemble generation, random states |
-| `mathematics.py` | Eigendecomposition, spectral overlap, Krylov tests |
-| `optimize.py` | Maximize S(λ) using scipy.optimize |
 | `settings.py` | All config constants, defaults, hyperparameters |
+| `states.py` | Stabilizer code / QEC state generation utilities |
+| `floquet.py` | Floquet engineering via Magnus expansion |
+| `moment_criteria.py` | Moment criterion (static and Floquet variants, experimental) |
+| `optimization.py` | Time-dependent fidelity optimization (Floquet validation) |
 
 ### Scripts & Helpers
 
@@ -667,7 +762,7 @@ mathematics.py (compute S(λ))
        ↓
 analysis.py (collect results)
        ↓
-viz.py / viz_csv.py (render figures)
+viz.py (render figures)
        ↓
 fig/comparison/*.png + *.csv
 ```
@@ -799,7 +894,369 @@ python -m reach.cli three-criteria-vs-density --help
 
 ---
 
-**Version**: 0.1.0
-**Last updated**: 2025-10-22
+---
+
+## Three-Criteria Comparison with Continuous Krylov
+
+### Overview
+
+The continuous Krylov implementation enables fair comparison between Spectral and Krylov criteria by optimizing both over the parameter space λ ∈ [-1,1]ᴷ.
+
+### Mathematical Details
+
+**Krylov score:** R(λ) = ‖P_Kₘ(H(λ))|φ⟩‖²
+
+where P_Kₘ is the orthogonal projection onto the Krylov subspace K_m(H(λ), |ψ⟩).
+
+**Key identity:** R(λ) = 1 - ε²_res where ε_res is the residual norm (verified to 10 decimal places).
+
+**Optimization:** R* = max_{λ} R(λ) via L-BFGS-B with multi-restart.
+
+### Usage Example
+
+```python
+from reach import analysis, viz
+
+# Run three-criteria comparison
+data = analysis.monte_carlo_unreachability_vs_density(
+    dims=[14, 16, 18],
+    rho_max=0.12,
+    rho_step=0.01,
+    taus=[0.95],
+    ensemble="GUE",
+    nks=25,
+    nst=15
+)
+
+# Generate figures
+viz.plot_unreachability_three_criteria_vs_density(
+    data=data,
+    ensemble="GUE",
+    outdir="fig/comparison",
+    trials=375,
+    y_axis="unreachable"
+)
+```
+
+### Ensemble-Specific Behavior
+
+| Ensemble | Operator Structure | Expected Behavior |
+|----------|-------------------|-------------------|
+| **GUE** | Dense (d² non-zeros) | Smooth transitions |
+| **GOE** | Dense (d² non-zeros) | Similar to GUE |
+| **Canonical** | Sparse (2 non-zeros each) | Sharp/discontinuous transitions |
+| **GEO2** | Sparse Pauli chains | Sharper than GUE |
+
+**Note on Canonical Basis:** Discontinuous behavior is physical, not a bug. With k sparse operators (each having only 2 non-zero elements), the parameterized Hamiltonian H(λ) can't span enough of Hilbert space at low density, leading to binary-like reachability.
+
+### Continuous vs Binary Krylov
+
+| Feature | Binary (old) | Continuous (new) |
+|---------|--------------|------------------|
+| Parameters | Fixed/Random λ | Optimized λ* |
+| Output | Boolean | Score R* ∈ [0,1] |
+| Threshold | Hard-coded | Adjustable τ |
+| Comparison | Unfair | Fair (both optimize) |
+| Statistics | None | Mean/SEM available |
+
+---
+
+### Publication Plots (from overnight data)
+
+```bash
+python scripts/production/plot_overnight_v7style.py
+```
+
+**Output**: Publication-ready figures in `fig/publication/`:
+- `canonical_3panel.png` - 3-panel (Moment | Spectral | Krylov) for canonical, all dimensions
+- `geo2_3panel.png` - Same for GEO2 ensemble
+- `canonical_3panel_vs_K.png` - Same as canonical 3-panel with K on x-axis
+- `geo2_3panel_vs_K.png` - Same as GEO2 3-panel with K on x-axis
+- `Kc_vs_d.png` - Critical K_c scaling with dimension
+- `combined_criteria_canonical_d{d}_tau099.png` - All criteria for each dimension
+- `combined_criteria_geo2_d{d}_tau099.png` - Same for GEO2
+
+**Data provenance**: See `fig/overnight/PUBLICATION_PLOTS.md`.
+
+### Benchmark Plots (confusion matrices)
+
+```bash
+python scripts/benchmarks/confusion_matrix_benchmark.py
+```
+
+**Output**: `fig/benchmarks/`:
+- `confusion_matrix_canonical.png` - TP/FP/TN/FN for spectral/krylov on canonical
+- `confusion_matrix_geo2.png` - Same for GEO2
+- `accuracy_vs_time.png` - Accuracy vs wall time
+- `iterations_vs_accuracy.png` - Score vs maxiter
+
+**Methodology**: See `fig/benchmarks/BENCHMARKS_README.md`.
+
+---
+
+**Version**: 0.4.0
+**Last updated**: 2026-02-08
 **Python**: 3.10+
-**Status**: Production-ready with streaming CSV and incremental plotting
+**Status**: Production-ready with overnight data, analytical gradients, and pipeline audit
+
+
+
+## Criterion Ordering Analysis
+
+### Overview
+
+The **criterion ordering analysis** investigates the relative performance of Spectral vs Krylov criteria across different Hamiltonian ensembles and integrability levels.
+
+### Key Finding: Krylov < Spectral is Universal
+
+The Krylov criterion consistently detects reachability at **lower operator density** than Spectral:
+
+| Ensemble | d | Ratio ρ_c(S)/ρ_c(K) | Interpretation |
+|----------|---|---------------------|----------------|
+| **GEO2** | 16 | 1.7 | Krylov needs 41% fewer operators |
+| **GEO2** | 32 | 6.0 | Krylov needs 83% fewer operators |
+| **GEO2** | 64 | 13.4 | Krylov needs 93% fewer operators |
+| **Canonical** | 10-26 | ~1.6 | Krylov needs ~38% fewer operators |
+
+### Scaling Analysis
+
+Power-law fits K_c ∝ d^α reveal different scaling:
+
+| Ensemble | Criterion | Exponent α | Interpretation |
+|----------|-----------|------------|----------------|
+| GEO2 | Krylov | 1.24 | Near-linear (efficient) |
+| GEO2 | Spectral | 2.47 | Superquadratic (inefficient) |
+| Canonical | Both | ~1.0 | Linear |
+
+### λ-Independence of Krylov
+
+The Krylov criterion is **nearly λ-independent** due to scaling invariance:
+```
+H(cλ)^k|ψ⟩ = c^k H(λ)^k|ψ⟩  →  Same span!
+```
+
+Only the **direction** of λ matters, not its magnitude. This explains why Fixed λ ≈ Optimized λ for Krylov.
+
+### Scripts
+
+```bash
+# Generate publication figures (ratio, K_c scaling, λ explanation)
+python scripts/analysis/create_publication_figures.py
+
+# Run dimension dependence analysis
+python scripts/analysis/dimension_dependence.py
+
+# Analyze Fixed vs Optimized gap
+python scripts/analysis/fixed_vs_optimized.py
+```
+
+### Output Files
+
+- `fig/publication/main_ratio_vs_dimension.png` - Main result figure
+- `fig/publication/kc_vs_dimension.png` - K_c scaling analysis
+- `fig/publication/lambda_explanation.png` - Why Krylov is λ-independent
+- `docs/CRITERION_ORDERING_ANALYSIS.md` - Detailed analysis documentation
+
+---
+
+## Integrability Study
+
+### Overview
+
+The **integrability study** investigates how quantum chaos (measured by level spacing statistics) affects criterion performance.
+
+### Hamiltonian Models
+
+1. **Integrable Ising**: H = Σ Jᵢ σᶻᵢσᶻᵢ₊₁ + Σ hᵢ σᶻᵢ (Poisson, ⟨r⟩ ≈ 0.39)
+2. **Near-Integrable**: H = J Σ σᶻσᶻ + h Σ σᶻ + g Σ σˣ (tunable via g)
+3. **Chaotic Heisenberg**: Random XX+YY+ZZ couplings (GOE, ⟨r⟩ ≈ 0.53)
+
+### Key Results
+
+| Model | ⟨r⟩ | Spectral | Krylov |
+|-------|-----|----------|--------|
+| Integrable | 0.39 | **FAILS** (P=1 always) | Works |
+| Near-integrable | 0.16 | **FAILS** | Works |
+| Chaotic | 0.54 | Works (ρ_c ≈ 0.04) | Works (ρ_c ≈ 0.04) |
+
+**Key insight**: Spectral criterion **fails** for integrable systems because eigenstates are λ-independent. Krylov works universally because it probes dynamics, not eigenstructure.
+
+### Running Experiments
+
+```bash
+# Basic three-model comparison (d=8, 16)
+python scripts/integrability/three_models_comparison.py
+
+# Extended study (d=8, 16, 32 + g-sweep)
+python scripts/integrability/extended_integrability_study.py --mode both --trials 50
+```
+
+### Output Files
+
+- `fig/integrability/three_models_comparison.png` - Main comparison figure
+- `fig/integrability/extended_integrability_comparison.png` - d=32 results
+- `fig/integrability/g_sweep_analysis.png` - Transverse field sweep
+- `docs/INTEGRABILITY_METHODOLOGY.md` - Complete methodology documentation
+
+---
+
+## GEO2LOCAL Experiments
+
+### Overview
+GEO2LOCAL studies quantum reachability for 2D geometric lattice Hamiltonians with local (2-body) interactions.
+
+### Default Plotting
+```bash
+python3 scripts/geo2/plot_geo2_v3.py
+```
+
+### Key Results
+- **Linear scaling:** ρ_c = 0.0455 + 0.00220×d (R² = 0.929)
+- **Spectral criterion:** Requires λ-optimization (Fixed flat at P=1)
+- **Krylov criterion:** Approximately λ-independent (Fixed ≈ Optimized)
+- **Moment criterion:** Very weak (always satisfied at low ρ)
+
+### Data Location
+- Production data: `data/raw_logs/geo2_production_complete_*.pkl`
+- Figures: `fig/geo2/geo2_*_v3.png`
+
+### Detailed Analysis
+See `docs/GEO2_ANALYSIS_SUMMARY.md` for comprehensive results.
+
+---
+
+## GEO2 Optimizer Audit (2026-01-27)
+
+### Problem
+GEO2LOCAL plots showed anomalous dimension ordering: P(unreachable) dropped earlier for d=16 than d=32/d=64, contradicting physical expectations.
+
+### Root Cause
+The GEO2 optimizer used `maxiter=20, restarts=1` (labeled "AGGRESSIVE for performance"), which was catastrophically insufficient for K = O(d²) parameters. This caused a **70% false-unreachable rate** on provably reachable targets.
+
+### Fix Applied
+Updated `reach/settings.py` with validated settings:
+
+| Parameter | Old (Broken) | New (Validated) | Impact |
+|-----------|-------------|-----------------|--------|
+| `maxiter` | 20 | 100 | 5× more gradient steps |
+| `restarts` | 1 | 3 | 3× more starting points |
+| `ftol` | 1e-4 | 1e-6 | Tighter convergence |
+
+### Analytical Gradient
+Implemented `spectral_overlap_with_grad()` using first-order eigenvalue perturbation theory, providing **5-11× speedup** over finite differences. This compensates for the increased maxiter, making corrected settings comparable in wall-time to the old broken settings.
+
+### Criterion Behavior by Ensemble
+
+| Criterion | GUE/GOE (Dense) | Canonical (Sparse) | GEO2 (Dense) |
+|-----------|-----------------|-------------------|---------------|
+| **Spectral** | Smooth transition at ρ_c≈0.07 | Sharp transition | ρ_c≈0.025-0.039 |
+| **Krylov** | Smooth, ρ_c < spectral | Sharp transition | **Always reachable** (R=1) |
+| **Moment** | Conservative baseline | N/A | ρ_c≈0.005-0.012 |
+
+**Why Krylov=1 for GEO2**: Dense GEO2 Hamiltonians (rank = d) fill the entire Krylov space K_m with just K=2 operators, making the Krylov criterion uninformative.
+
+### Audit Scripts
+All validation scripts are in `scripts/audit/`. See `scripts/audit/AUDIT_FINDINGS.md` for the complete audit report.
+
+### Production Settings
+For fair cross-ensemble comparison, use `settings.get_production_settings(d)`:
+```python
+from reach.settings import get_production_settings
+opts = get_production_settings(d=64, ensemble='GEO2')
+# Returns: maxiter=150, restarts=3, ftol=1e-6
+```
+
+## Recent Updates (2026-01-28)
+
+### Analytical Gradients
+
+Both spectral and Krylov criteria now have analytical gradients for L-BFGS-B optimization:
+
+| Criterion | Function | Method | Speedup |
+|-----------|----------|--------|---------|
+| Spectral | `spectral_overlap_with_grad()` | Eigenvalue perturbation theory | 5-64x |
+| Krylov | `krylov_score_with_grad()` | Arnoldi iteration differentiation | 1.4-6.5x |
+
+Both gradients are automatically used by `optimize.py` when `method='L-BFGS-B'`.
+
+**Krylov gradient details:**
+- Propagates derivatives through modified Gram-Schmidt orthogonalization
+- Handles Krylov breakdown correctly (gradient = 0 at degenerate points)
+- Verified against finite differences: error < 1e-10 for all ensembles
+- Verification script: `scripts/audit/verify_krylov_gradient.py`
+
+**Krylov basis bugfix:** Fixed `krylov_basis()` to correctly truncate to actual Krylov dimension when breakdown occurs, preventing spurious QR-generated vectors from inflating the score.
+
+### Moment Criterion Comparison
+
+Two implementations compared (null-space vs x-sweep):
+
+| Metric | Null-Space | X-Sweep |
+|--------|------------|---------|
+| Agreement | 99.2% (400 tests) | 99.2% |
+| False Positives | 0% | 0% |
+| Speed | **1x (baseline)** | 24-65x slower |
+
+**Recommendation:** Use null-space approach in all production code.
+See `scripts/audit/MOMENT_COMPARISON.md` for full analysis.
+
+### Parallel Evaluation
+
+Monte Carlo trials can now run in parallel using joblib:
+
+```python
+from reach.parallel import parallel_evaluate
+
+result = parallel_evaluate(
+    ensemble='canonical',
+    d=16, K=8, tau=0.99,
+    n_trials=200,
+    n_jobs=-1  # Use all cores
+)
+print(f"P(unreachable) = {result['spectral_P']:.3f}")
+```
+
+Speedup is significant for d >= 32 with many trials, where per-trial computation dominates process creation overhead.
+
+### Adaptive Sampling
+
+Automatic dense sampling near phase transitions:
+
+```python
+from reach.adaptive_sampling import generate_adaptive_rho_points, AdaptiveSamplingConfig
+
+config = AdaptiveSamplingConfig(rho_min=0.005, rho_max=0.20, n_dense=20)
+rho_dense = generate_adaptive_rho_points(coarse_rho, coarse_P, config)
+```
+
+### Overnight Production Runs
+
+Scripts for generating publication-quality data:
+
+```bash
+# Canonical ensemble (8-12 hours)
+nohup python scripts/production/overnight_canonical.py > logs/canonical_overnight.log 2>&1 &
+
+# GEO2 ensemble (10-15 hours)
+nohup python scripts/production/overnight_geo2.py > logs/geo2_overnight.log 2>&1 &
+```
+
+| Run | Dimensions | rho points | Trials | Criteria | Est. Time |
+|-----|------------|------------|--------|----------|-----------|
+| Canonical | 8, 16, 32, 64 | ~28/dim × 3 tau | 200 | S, K, M | 8-12h |
+| GEO2 | 8, 16, 32, 64 | ~28/dim × 1 tau | 200 (100 for d=64) | S, K, M (S, M for d=64) | 10-15h |
+
+Data saved to `data/overnight/` with periodic checkpoints.
+
+### Audit Summary
+
+All criteria verified against mathematical definitions:
+
+| Criterion | Status | Key Finding |
+|-----------|--------|-------------|
+| Spectral | PASS | Gradient matches FD to 1e-10 |
+| Krylov | PASS | Basis truncation bug fixed |
+| Moment | PASS | Null-space ~36x faster than x-sweep |
+| Optimizer | PASS | 0% false-unreachable after fix |
+
+Full report: `scripts/audit/AUDIT_SUMMARY.md`

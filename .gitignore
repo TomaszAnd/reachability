@@ -1,6 +1,41 @@
-# Generated plots - included in repository for easy viewing
-# fig/**/*.png
-# fig/**/*.pdf
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
 
 # Logs
 *.log
@@ -8,28 +43,18 @@ generation*.log
 production.log
 nohup.out
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
-dist/
-build/
-*.egg
+# LaTeX auxiliary files
+latex-summary/*.aux
+latex-summary/*.bbl
+latex-summary/*.blg
+latex-summary/*.log
+latex-summary/*.out
+latex-summary/*.toc
+latex-summary/*.synctex.gz
+latex-summary/*.fdb_latexmk
+latex-summary/*.fls
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 .directory
@@ -42,10 +67,14 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+*.temp
+*.bak
 
 # Environment
 .env
-venv/
-env/
-ENV/
+
+# Ruff cache
+.ruff_cache/
+
+# Claude Code instructions (project-specific, not for repo)
 CLAUDE.md
