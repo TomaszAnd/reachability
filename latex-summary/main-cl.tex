@@ -209,7 +209,7 @@ Hence, we can formulate the spectral overlap criterion: A state is reachable if 
 \end{equation}
 equals 1 such that the two probability distributions coincide. To understand whether a set of generators leads to reachability, we numerically maximize $S$ by varying $\lambda_n$ (see Eq.~\eqref{eq:decomposition}). If the maximum value of $S$ falls below $1 - \varepsilon$ for a chosen tolerance $\varepsilon$, the state is deemed unreachable.
 
-Unlike the moment criterion, the spectral criterion requires numerical optimization, which may converge to local maxima and gis not guaranteed to coincide with the global optimum. However, it offers a more fine-grained test: rather than checking polynomial constraints on expectation values, it directly examines whether the spectral distributions can be made to match. A further advantage is that optimization is only over the Hamiltonian parameters, not over time, since the probabilities $p_i$ and $q_i$ are time-independent.
+Unlike the moment criterion, the spectral criterion requires numerical optimization, which may converge to local maxima and is not guaranteed to coincide with the global optimum. However, it offers a more fine-grained test: rather than checking polynomial constraints on expectation values, it directly examines whether the spectral distributions can be made to match. A further advantage is that optimization is only over the Hamiltonian parameters, not over time, since the probabilities $p_i$ and $q_i$ are time-independent.
 \todoko{add ref to fig 1 and why you chose the shape there}
 
 \subsection{Krylov criterion} \label{ssec:kryl}
@@ -294,7 +294,7 @@ Consider the family
 \begin{equation}
 H = \sum_{i=1}^n \lambda_i \sigma_Z^{(i)} \sigma_Z^{(i+1)} + \lambda' \sum_{i=1}^n \sigma_X^{(i)} + \lambda'' \sigma_Z^{(1)}
 \end{equation}
-with open boundary conditions. The single-site $\sigma_Z^{(1)}$ term breaks the parity symmetry that would otherwise make $\prod_i \sigma_X^{(i)}$ a conserved quantity. This model appears in Ref.~\cite{whitty_quantum_2025}. We find that as the chain length $n$ grows, the unreachability probability of random states plateaus at around $1/3$. This is a numerical observation without analytical derivation,  but it's criticla that is that the fraction remains nonzero: this Hamiltonian family would be fully controllable with time-varying weights~\todoko{check this, seems to span full Lie algebra} but it still has provably unreachable states under autonomous evolution.
+with open boundary conditions. The single-site $\sigma_Z^{(1)}$ term breaks the parity symmetry that would otherwise make $\prod_i \sigma_X^{(i)}$ a conserved quantity. This model appears in Ref.~\cite{whitty_quantum_2025}. We find that as the chain length $n$ grows, the unreachability probability of random states plateaus at around $1/3$. This is a numerical observation without analytical derivation,  but it is critical that the fraction remains nonzero: this Hamiltonian family would be fully controllable with time-varying weights~\todoko{check this, seems to span full Lie algebra} but it still has provably unreachable states under autonomous evolution.
 \ph{A figure would help here}
 
 \paragraph{2D grids.}

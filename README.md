@@ -179,7 +179,7 @@ python scripts/generate_publication_dual_versions.py 2>&1 | tee logs/dual_versio
 - **EXP version**: P(ρ) = exp(-α d² (ρ - ρ_c)), linearized as ln(P)
 - **POW2 version**: P(ρ) = 2^(-ρ/ρ_c), linearized as log₂(P)
 
-**Data sources**: See [DATA_PROVENANCE.md](DATA_PROVENANCE.md) for complete data lineage, merging strategies, and access patterns.
+**Data sources**: See [DATA_PROVENANCE.md](docs/DATA_PROVENANCE.md) for complete data lineage, merging strategies, and access patterns.
 
 **Reproduction details**: See [CLAUDE.md](CLAUDE.md#reproducing-publication-figures) for step-by-step workflow.
 
