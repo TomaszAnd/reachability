@@ -36,7 +36,6 @@ print(f"   Operator shape: {model.basis[0].shape}")
 print(f"\n2. Sample submodel with K=10 operators")
 sub = model.sample_submodel(10)
 print(f"   Submodel K: {sub.K}")
-print(f"   Metadata: {sub.metadata.description}")
 
 # States
 psi = model.init_state()
@@ -45,23 +44,22 @@ print(f"   Initial state |0>: norm = {np.linalg.norm(psi):.4f}")
 print(f"   Random target: norm = {np.linalg.norm(phi):.4f}")
 
 # ============================================================================
-# 3. Evaluate all three criteria
+# 3. Evaluate all three criteria (passing model to constructors)
 # ============================================================================
 print(f"\n3. Evaluate reachability criteria")
-hams = sub.basis
 
 # Spectral
-sc = SpectralCriterion(hams, psi, phi, tau=0.99)
+sc = SpectralCriterion(sub, psi, phi, tau=0.99)
 spec_result = sc.is_reachable(maxiter=100, restarts=2)
 print(f"   Spectral:  verdict={spec_result.verdict.value:12s}  S*={spec_result.score:.4f}")
 
 # Krylov
-kc = KrylovCriterion(hams, psi, phi, tau=0.99, m=min(10, 8))
+kc = KrylovCriterion(sub, psi, phi, tau=0.99, m=min(10, 8))
 kryl_result = kc.is_reachable(maxiter=100, restarts=2)
 print(f"   Krylov:    verdict={kryl_result.verdict.value:12s}  R*={kryl_result.score:.4f}")
 
 # Moment
-mc = MomentCriterion(hams, psi, phi, tau=0.99)
+mc = MomentCriterion(sub, psi, phi, tau=0.99)
 mom_result = mc.is_reachable()
 print(f"   Moment:    verdict={mom_result.verdict.value:12s}  ", end="")
 if mom_result.certificate:

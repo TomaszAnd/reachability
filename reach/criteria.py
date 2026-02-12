@@ -1,17 +1,24 @@
 """
 Reachability criteria for quantum control systems.
 
-Three criteria for testing whether a target state |phi> is reachable
+Three criteria for testing whether target state |phi> is reachable
 from initial state |psi> under H(lambda) = sum_k lambda_k H_k:
 
-- SpectralCriterion: S(lambda) = sum_n |<u_n|phi>* <u_n|psi>| (eigendecomposition)
-- KrylovCriterion: R(lambda) = ||P_Km |phi>||^2 (Krylov subspace projection)
-- MomentCriterion: Q + x L L^T > 0 (positive definiteness of moment matrix)
+- SpectralCriterion: Spectral overlap S(lambda) = sum_n |<u_n|phi>* <u_n|psi>|
+- KrylovCriterion: Krylov projection R(lambda) = ||P_K |phi>||^2
+- MomentCriterion: Positive definiteness of moment matrix Q + x L L^T
 
-Each criterion returns a three-valued Verdict:
-- REACHABLE: score >= tau (strong evidence of reachability)
-- UNREACHABLE: score < tau (or moment certificate proves it)
-- INCONCLUSIVE: criterion cannot determine (e.g., moment fails to find certificate)
+Verdict system:
+- SpectralCriterion and KrylovCriterion return:
+  - REACHABLE if optimized score >= tau
+  - UNREACHABLE if optimized score < tau
+
+- MomentCriterion returns:
+  - UNREACHABLE if positive definiteness certificate found
+  - INCONCLUSIVE if no certificate found (does NOT imply reachable)
+
+Note: INCONCLUSIVE is only used by MomentCriterion. Spectral and Krylov
+always return a definite verdict based on the threshold comparison.
 """
 
 from __future__ import annotations
@@ -64,23 +71,28 @@ class ReachabilityCriterion(ABC):
     """
     Abstract base class for reachability criteria.
 
-    Takes a QuantumModel's operator basis (as numpy arrays), initial state psi,
-    target state phi, and threshold tau.
+    Accepts either a QuantumModel or a list of Hamiltonian numpy arrays.
     """
 
     def __init__(
         self,
-        hams: List[np.ndarray],
+        model_or_hams,
         psi: np.ndarray,
         phi: np.ndarray,
         tau: float = 0.99,
     ):
-        self.hams = hams
+        from .models import QuantumModel
+        if isinstance(model_or_hams, QuantumModel):
+            self.model = model_or_hams
+            self.hams = model_or_hams.basis
+        else:
+            self.model = None
+            self.hams = model_or_hams
         self.psi = psi.flatten()
         self.phi = phi.flatten()
         self.tau = tau
-        self.K = len(hams)
-        self.dim = hams[0].shape[0]
+        self.K = len(self.hams)
+        self.dim = self.hams[0].shape[0]
 
     @abstractmethod
     def evaluate(
@@ -125,9 +137,17 @@ class SpectralCriterion(ReachabilityCriterion):
     def evaluate(
         self, lambdas: np.ndarray, return_gradient: bool = False
     ) -> Union[float, Tuple[float, np.ndarray]]:
-        """Compute S(lambda) and optionally its gradient."""
+        """
+        Compute spectral overlap S(lambda) and optionally its gradient.
+
+        S(lambda) = sum_n |<u_n(lambda)|phi>* <u_n(lambda)|psi>|
+
+        where |u_n(lambda)> are eigenstates of H(lambda) = sum_k lambda_k H_k.
+        """
+        # Build combined Hamiltonian H(lambda)
         H = construct_hamiltonian(lambdas, self.hams)
 
+        # Eigendecomposition: H |u_n> = E_n |u_n>
         try:
             eigenvalues, eigenvectors = eigendecompose(H)
         except RuntimeError:
@@ -135,29 +155,38 @@ class SpectralCriterion(ReachabilityCriterion):
                 return 0.0, np.zeros(self.K)
             return 0.0
 
+        # Project states onto eigenbasis: <u_n|psi> and <u_n|phi>
         psi_coeffs = eigenvectors.conj().T @ self.psi
         phi_coeffs = eigenvectors.conj().T @ self.phi
 
+        # Overlap coefficients: c_n = <u_n|phi>* <u_n|psi>
         c = phi_coeffs.conj() * psi_coeffs
         abs_c = np.abs(c)
+        # Spectral overlap: S = sum_n |c_n|
         S = float(np.sum(abs_c))
         S = np.clip(S, 0.0, 1.0)
 
         if not return_gradient:
             return S
 
-        # Analytical gradient via perturbation theory
+        # Analytical gradient via first-order perturbation theory.
+        # Phase factors: sign(c_n) = c_n / |c_n| (zero for vanishing terms)
         safe_abs_c = np.where(abs_c > 1e-15, abs_c, 1.0)
         sign_c = np.where(abs_c > 1e-15, c / safe_abs_c, 0.0)
 
+        # Energy differences: regularized inverse Delta/(Delta^2 + eps^2)
+        # smoothly handles degenerate eigenvalues
         E = eigenvalues
         delta_E = E[:, None] - E[None, :]
         eps_reg = 1e-12
         inv_delta_E = delta_E / (delta_E**2 + eps_reg)
 
+        # dS/dlambda_k = sum_n Re[sign(c_n)* dc_n/dlambda_k]
         grad = np.zeros(self.K)
         for k in range(self.K):
+            # Transform H_k to eigenbasis
             Hk_eig = eigenvectors.conj().T @ self.hams[k] @ eigenvectors
+            # Perturbation theory: d<u_n|psi>/dlambda_k
             dpsi = np.sum(Hk_eig * inv_delta_E * psi_coeffs[None, :], axis=1)
             dphi = np.sum(Hk_eig * inv_delta_E * phi_coeffs[None, :], axis=1)
             dc = dphi.conj() * psi_coeffs + phi_coeffs.conj() * dpsi
@@ -213,7 +242,11 @@ class KrylovCriterion(ReachabilityCriterion):
         self.m = m if m is not None else self.dim
 
     def _krylov_basis(self, H: np.ndarray) -> np.ndarray:
-        """Arnoldi iteration to build orthonormal Krylov basis."""
+        """
+        Build orthonormal Krylov basis K_m(H, psi) via Arnoldi iteration.
+
+        Returns (d, m) matrix with orthonormal columns, QR-compressed.
+        """
         d = H.shape[0]
         m = min(self.m, d)
         psi_norm = np.linalg.norm(self.psi)
@@ -241,7 +274,13 @@ class KrylovCriterion(ReachabilityCriterion):
     def evaluate(
         self, lambdas: np.ndarray, return_gradient: bool = False
     ) -> Union[float, Tuple[float, np.ndarray]]:
-        """Compute R(lambda) and optionally its gradient."""
+        """
+        Compute Krylov score R(lambda) and optionally its gradient.
+
+        R(lambda) = ||P_Km(H(lambda)) |phi>||^2
+
+        where P_Km is projection onto Krylov subspace K_m(H(lambda), psi).
+        """
         H = construct_hamiltonian(lambdas, self.hams)
         V = self._krylov_basis(H)
 

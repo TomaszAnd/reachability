@@ -20,6 +20,7 @@ from . import (
     math_utils,
     plotting,
     settings,
+    legacy,
 )
 
 __all__ = [
@@ -31,5 +32,6 @@ __all__ = [
     "math_utils",
     "plotting",
     "settings",
+    "legacy",
 ]
 __version__ = "0.2.0"

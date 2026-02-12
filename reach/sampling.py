@@ -112,26 +112,22 @@ class DensitySweep:
             child_seeds = self.model._seed_seq.spawn(cfg.n_hamiltonians)
 
             for h_idx in range(cfg.n_hamiltonians):
-                # Create submodel with K operators
-                h_rng_model = type(self.model).__new__(type(self.model))
-                # Re-initialize model with different seed for each Hamiltonian sample
                 sub_seed = child_seeds[h_idx].entropy
                 sub_model = _make_submodel(self.model, K, sub_seed)
-                hams = sub_model.basis
 
                 for t_idx in range(cfg.n_targets):
                     phi = sub_model.random_state()
                     m = cfg.krylov_m if cfg.krylov_m is not None else min(K, d)
 
                     if 'moment' in criteria:
-                        mc = MomentCriterion(hams, psi, phi, tau=cfg.tau)
+                        mc = MomentCriterion(sub_model, psi, phi, tau=cfg.tau)
                         result = mc.is_reachable()
                         if result.verdict == Verdict.UNREACHABLE:
                             counts['moment'] += 1
                         raw_scores['moment'].append(result.score)
 
                     if 'spectral' in criteria:
-                        sc = SpectralCriterion(hams, psi, phi, tau=cfg.tau)
+                        sc = SpectralCriterion(sub_model, psi, phi, tau=cfg.tau)
                         result = sc.is_reachable(
                             maxiter=cfg.maxiter, restarts=cfg.restarts,
                             method=cfg.method)
@@ -140,7 +136,7 @@ class DensitySweep:
                         raw_scores['spectral'].append(result.score)
 
                     if 'krylov' in criteria:
-                        kc = KrylovCriterion(hams, psi, phi, tau=cfg.tau, m=m)
+                        kc = KrylovCriterion(sub_model, psi, phi, tau=cfg.tau, m=m)
                         result = kc.is_reachable(
                             maxiter=cfg.maxiter, restarts=cfg.restarts,
                             method=cfg.method)
