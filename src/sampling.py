@@ -74,6 +74,7 @@ class DensitySweep:
         K_values: List[int],
         criteria: Optional[List[str]] = None,
         verbose: bool = True,
+        early_stop_zeros: int = 0,
     ) -> pd.DataFrame:
         """
         Run the sweep over given K values.
@@ -83,6 +84,8 @@ class DensitySweep:
             criteria: Which criteria to evaluate ('moment', 'spectral', 'krylov').
                       Default: all three.
             verbose: Print progress
+            early_stop_zeros: Stop after this many consecutive K values with P=0
+                              for ALL criteria. 0 = disabled.
 
         Returns:
             DataFrame with results
@@ -93,6 +96,7 @@ class DensitySweep:
         cfg = self.config
         d = self.model.dim
         psi = self.model.init_state()
+        consecutive_zeros = 0
 
         for K in K_values:
             if K > self.model.K:
@@ -168,6 +172,18 @@ class DensitySweep:
                 for c in criteria:
                     parts.append(f"{c}={row[f'{c}_P']:.2f}")
                 print(", ".join(parts))
+
+            # Early stopping: all criteria at P=0 for N consecutive K values
+            if early_stop_zeros > 0:
+                all_zero = all(row[f'{c}_P'] == 0 for c in criteria)
+                if all_zero:
+                    consecutive_zeros += 1
+                    if consecutive_zeros >= early_stop_zeros:
+                        if verbose:
+                            print(f"  Early stop: {early_stop_zeros} consecutive zeros")
+                        break
+                else:
+                    consecutive_zeros = 0
 
         return pd.DataFrame(self._results)
 
