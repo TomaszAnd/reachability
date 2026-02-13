@@ -10,8 +10,8 @@ Reproduces the exact visual style of:
 - fig/geo2/geo2_d64_summary_v3.png                (same)
 
 Data sources (MERGED):
-- Overnight data (spectral + moment): data/overnight/*.csv
-- Corrected Krylov data (m=min(K,d)): data/krylov_corrected/*.csv
+- Canonical: data/canonical/overnight_*.csv + data/canonical/krylov_corrected_*.csv
+- QubitGrid: data/qubitgrid/overnight_*.csv + data/qubitgrid/krylov_corrected_*.csv
 
 The overnight krylov_* columns used m=d (stale), so we merge with corrected data
 which uses m=min(K,d) for genuine Krylov phase transitions.
@@ -185,21 +185,16 @@ def load_merged_data(ensemble):
     Returns:
         DataFrame with spectral/moment from overnight + krylov from corrected
     """
-    overnight_dir = Path(__file__).parent.parent.parent / 'data' / 'overnight'
-    krylov_dir = Path(__file__).parent.parent.parent / 'data' / 'krylov_corrected'
+    data_root = Path(__file__).parent.parent.parent / 'data'
 
     if ensemble == 'canonical':
-        overnight_file = overnight_dir / 'canonical_overnight_20260128_224236.csv'
-        # Use dense Krylov data (v24) if available, fall back to corrected (v23)
-        krylov_file = krylov_dir / 'canonical_krylov_dense_20260205_170823.csv'
-        if not krylov_file.exists():
-            krylov_file = krylov_dir / 'canonical_krylov_corrected_20260204_222726.csv'
+        data_dir = data_root / 'canonical'
+        overnight_file = data_dir / 'overnight_20260128_224236.csv'
+        krylov_file = data_dir / 'krylov_corrected_20260204_222726.csv'
     elif ensemble == 'GEO2':
-        overnight_file = overnight_dir / 'geo2_overnight_20260128_224613.csv'
-        # Use dense Krylov data (v24) if available, fall back to corrected (v23)
-        krylov_file = krylov_dir / 'geo2_krylov_dense_20260205_170823.csv'
-        if not krylov_file.exists():
-            krylov_file = krylov_dir / 'geo2_krylov_corrected_20260204_222747.csv'
+        data_dir = data_root / 'qubitgrid'
+        overnight_file = data_dir / 'overnight_20260128_224613.csv'
+        krylov_file = data_dir / 'krylov_corrected_20260204_222747.csv'
     else:
         return None
 
@@ -267,18 +262,12 @@ def load_overnight_data():
 
 def load_corrected_krylov_data(ensemble):
     """Load corrected Krylov data directly (for fitting purposes)."""
-    krylov_dir = Path(__file__).parent.parent.parent / 'data' / 'krylov_corrected'
+    data_root = Path(__file__).parent.parent.parent / 'data'
 
     if ensemble == 'canonical':
-        # Use dense Krylov data (v24) if available
-        krylov_file = krylov_dir / 'canonical_krylov_dense_20260205_170823.csv'
-        if not krylov_file.exists():
-            krylov_file = krylov_dir / 'canonical_krylov_corrected_20260204_222726.csv'
+        krylov_file = data_root / 'canonical' / 'krylov_corrected_20260204_222726.csv'
     elif ensemble == 'GEO2':
-        # Use dense Krylov data (v24) if available
-        krylov_file = krylov_dir / 'geo2_krylov_dense_20260205_170823.csv'
-        if not krylov_file.exists():
-            krylov_file = krylov_dir / 'geo2_krylov_corrected_20260204_222747.csv'
+        krylov_file = data_root / 'qubitgrid' / 'krylov_corrected_20260204_222747.csv'
     else:
         return None
 
@@ -1005,17 +994,17 @@ def generate_documentation(
         "",
         "The corrected Krylov experiments use `m=min(K,d)`, creating genuine phase transitions.\n",
         "### Canonical Ensemble",
-        "- **Spectral/Moment**: `data/overnight/canonical_overnight_20260128_224236.csv`",
+        "- **Spectral/Moment**: `data/canonical/overnight_20260128_224236.csv`",
         "  - 327 data points, 142.9 hours runtime",
-        "- **Krylov (corrected)**: `data/krylov_corrected/canonical_krylov_corrected_20260204_222726.csv`",
+        "- **Krylov (corrected)**: `data/canonical/krylov_corrected_20260204_222726.csv`",
         "  - 108 data points, ~10 hours runtime, m=min(K,d)",
         "- **Dimensions**: d in {8, 16, 32, 64}",
         "- **Threshold**: tau = 0.99 (plots)",
         "- **Trials per point**: 200\n",
-        "### GEO2 Ensemble",
-        "- **Spectral/Moment**: `data/overnight/geo2_overnight_20260128_224613.csv`",
+        "### QubitGrid Ensemble",
+        "- **Spectral/Moment**: `data/qubitgrid/overnight_20260128_224613.csv`",
         "  - 101 data points, 47.2 hours runtime",
-        "- **Krylov (corrected)**: `data/krylov_corrected/geo2_krylov_corrected_20260204_222747.csv`",
+        "- **Krylov (corrected)**: `data/qubitgrid/krylov_corrected_20260204_222747.csv`",
         "  - 96 data points, ~5.4 hours runtime, m=min(K,d)",
         "- **Dimensions**: d in {8, 16, 32, 64}",
         "- **Threshold**: tau = 0.99",
@@ -1221,11 +1210,12 @@ def main():
     print("OVERNIGHT PUBLICATION PLOTS - UNIFIED STYLE")
     print("=" * 70)
 
-    output_dir = Path(__file__).parent.parent.parent / 'fig' / 'overnight'
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    pub_dir = Path(__file__).parent.parent.parent / 'fig' / 'publication'
-    pub_dir.mkdir(parents=True, exist_ok=True)
+    fig_root = Path(__file__).parent.parent.parent / 'fig'
+    can_fig_dir = fig_root / 'canonical'
+    can_fig_dir.mkdir(parents=True, exist_ok=True)
+    geo_fig_dir = fig_root / 'qubitgrid'
+    geo_fig_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = can_fig_dir  # default for shared plots
 
     # Load data
     print("\n[1/11] Loading data...")
@@ -1260,7 +1250,7 @@ def main():
         for d in geo_dims:
             fname = f'combined_criteria_geo2_d{int(d)}_tau099.png'
             fits = plot_combined_criteria_geo2(
-                df_geo2, output_dir / fname, d=int(d), tau=0.99)
+                df_geo2, geo_fig_dir / fname, d=int(d), tau=0.99)
             print(f"  d={int(d)}: {list(fits.keys())}")
             if int(d) == 32:
                 fits_geo2_combined = fits
@@ -1279,7 +1269,7 @@ def main():
     fits_geo2_3p = {}
     if df_geo2 is not None:
         fits_geo2_3p = plot_geo2_3panel(
-            df_geo2, output_dir / 'geo2_3panel.png', tau=0.99)
+            df_geo2, geo_fig_dir / 'geo2_3panel.png', tau=0.99)
         for k, v in fits_geo2_3p.items():
             print(f"  {k}: fitted d={sorted(v.keys())}")
 
@@ -1298,14 +1288,14 @@ def main():
         for d in geo_dims:
             fname = f'geo2_combined_criteria_vs_K_d{int(d)}_tau099.png'
             plot_combined_criteria_geo2_vs_K(
-                df_geo2, output_dir / fname, d=int(d), tau=0.99)
+                df_geo2, geo_fig_dir / fname, d=int(d), tau=0.99)
             print(f"  d={int(d)}")
 
     # Plot 7
     print("\n[8/11] GEO2 3-panel vs K...")
     if df_geo2 is not None:
         plot_geo2_3panel_vs_K(
-            df_geo2, output_dir / 'geo2_3panel_vs_K.png', tau=0.99)
+            df_geo2, geo_fig_dir / 'geo2_3panel_vs_K.png', tau=0.99)
 
     # Plot 8: Canonical combined criteria vs K (all dimensions)
     print("\n[9/11] Canonical combined criteria vs K (all d)...")
@@ -1328,34 +1318,17 @@ def main():
     generate_documentation(
         fits_can_3p, fits_geo2_3p,
         fits_can_combined, fits_geo2_combined,
-        Kc_params, output_dir / 'PUBLICATION_PLOTS.md')
-
-    # Copy all plots to fig/publication/
-    import shutil
-    print("\nCopying to fig/publication/...")
-    for src in sorted(output_dir.glob('*.png')):
-        shutil.copy2(src, pub_dir / src.name)
-        print(f"  Copied {src.name}")
+        Kc_params, can_fig_dir / 'PUBLICATION_PLOTS.md')
 
     # Summary
     print("\n" + "=" * 70)
     print("GENERATED FILES:")
     print("=" * 70)
-    for f in sorted(output_dir.glob('*')):
-        if f.is_file() and f.name in [
-            'combined_criteria_canonical_d64_tau099.png',
-            'combined_criteria_geo2_d32_tau099.png',
-            'canonical_3panel.png',
-            'geo2_3panel.png',
-            'Kc_vs_d.png',
-            'geo2_combined_criteria_vs_K_d32_tau099.png',
-            'geo2_3panel_vs_K.png',
-            'canonical_combined_criteria_vs_K_d64_tau099.png',
-            'canonical_3panel_vs_K.png',
-            'PUBLICATION_PLOTS.md',
-        ]:
-            size = f.stat().st_size / 1024
-            print(f"  {f.name:45s} ({size:7.0f} KB)")
+    for fig_dir in [can_fig_dir, geo_fig_dir]:
+        for f in sorted(fig_dir.glob('*')):
+            if f.is_file():
+                size = f.stat().st_size / 1024
+                print(f"  {fig_dir.name}/{f.name:45s} ({size:7.0f} KB)")
     print("=" * 70)
 
 

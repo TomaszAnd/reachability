@@ -691,13 +691,13 @@ def test_H_data_pipeline():
     results = {'passed': 0, 'failed': 0, 'details': []}
 
     data_dir = Path(__file__).parent.parent.parent / 'data'
-    overnight_dir = data_dir / 'overnight'
-    krylov_dir = data_dir / 'krylov_corrected'
+    canonical_dir = data_dir / 'canonical'
+    qubitgrid_dir = data_dir / 'qubitgrid'
 
     # H1: Overnight CSV integrity
     overnight_files = {
-        'canonical': overnight_dir / 'canonical_overnight_20260128_224236.csv',
-        'GEO2': overnight_dir / 'geo2_overnight_20260128_224613.csv',
+        'canonical': canonical_dir / 'overnight_20260128_224236.csv',
+        'GEO2': qubitgrid_dir / 'overnight_20260128_224613.csv',
     }
 
     for name, fpath in overnight_files.items():
@@ -727,8 +727,8 @@ def test_H_data_pipeline():
 
     # H2: Corrected Krylov CSV integrity
     krylov_files = {
-        'canonical': krylov_dir / 'canonical_krylov_corrected_20260204_222726.csv',
-        'GEO2': krylov_dir / 'geo2_krylov_corrected_20260204_222747.csv',
+        'canonical': canonical_dir / 'krylov_corrected_20260204_222726.csv',
+        'GEO2': qubitgrid_dir / 'krylov_corrected_20260204_222747.csv',
     }
 
     for name, fpath in krylov_files.items():
@@ -753,8 +753,8 @@ def test_H_data_pipeline():
                 print(f"      {len(bad_rows)} rows have incorrect m values")
 
     # H3: Merged data consistency
-    canonical_overnight = overnight_dir / 'canonical_overnight_20260128_224236.csv'
-    canonical_krylov = krylov_dir / 'canonical_krylov_corrected_20260204_222726.csv'
+    canonical_overnight = canonical_dir / 'overnight_20260128_224236.csv'
+    canonical_krylov = canonical_dir / 'krylov_corrected_20260204_222726.csv'
 
     if canonical_overnight.exists() and canonical_krylov.exists():
         df_over = pd.read_csv(canonical_overnight)

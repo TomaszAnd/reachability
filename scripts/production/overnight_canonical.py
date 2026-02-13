@@ -70,7 +70,7 @@ CONFIG = {
 
 
 def run_overnight():
-    output_dir = Path(__file__).parent.parent.parent / 'data' / 'overnight'
+    output_dir = Path(__file__).parent.parent.parent / 'data' / 'canonical'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

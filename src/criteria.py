@@ -514,7 +514,7 @@ class MomentCriterion(ReachabilityCriterion):
         for gamma in [1000.0, -1000.0]:
             M = Q + gamma * L_outer
             eigvals = np.linalg.eigvalsh(M)
-            if np.all(eigvals > tol):
+            if np.all(eigvals > tol) or np.all(eigvals < -tol):
                 return True, gamma, eigvals
 
         return False, None, np.array([])
@@ -528,10 +528,11 @@ class MomentCriterion(ReachabilityCriterion):
         unreachable, x_opt, eigvals = self._check()
 
         if unreachable:
+            sign = ">" if eigvals[0] > 0 else "<"
             return ReachabilityResult(
                 verdict=Verdict.UNREACHABLE,
                 score=1.0,
-                certificate=f"Q + {x_opt:.4f} LL^T > 0",
+                certificate=f"Q + {x_opt:.4f} LL^T {sign} 0",
                 raw_data={"x_opt": x_opt, "eigvals": eigvals},
             )
         else:

@@ -90,13 +90,13 @@ CONFIG = {
 
 
 def run_overnight():
-    output_dir = Path(__file__).parent.parent.parent / 'data' / 'overnight'
+    output_dir = Path(__file__).parent.parent.parent / 'data' / 'qubitgrid'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
     print("=" * 70)
-    print(f"OVERNIGHT GEO2 RUN - {timestamp}")
+    print(f"OVERNIGHT QUBITGRID RUN - {timestamp}")
     print("=" * 70)
     print(f"Dimensions: {CONFIG['dimensions']}")
     print(f"Tau values: {CONFIG['tau_values']}")
@@ -134,7 +134,7 @@ def run_overnight():
                 verbose=True,
             )
 
-            checkpoint_file = output_dir / f'geo2_d{d}_tau{tau}_{timestamp}.csv'
+            checkpoint_file = output_dir / f'qubitgrid_d{d}_tau{tau}_{timestamp}.csv'
             sweep.save(checkpoint_file)
             print(f"  Saved: {checkpoint_file}")
 
