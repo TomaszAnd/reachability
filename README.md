@@ -1,5 +1,8 @@
 # Quantum Reachability Analysis
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Test whether a target quantum state |phi> is reachable from initial state |psi>
 under parameterized Hamiltonian H(lambda) = sum_k lambda_k H_k,
 without explicit time evolution.
@@ -40,11 +43,11 @@ See [`notebooks/quickstart.ipynb`](notebooks/quickstart.ipynb) for a complete tu
 
 ### Criteria
 
-| Criterion | Formula | Verdict |
-|-----------|---------|---------|
-| Spectral | S(lambda) = sum \|<u_n\|phi>\*<u_n\|psi>\| | REACHABLE / UNREACHABLE |
-| Krylov | R(lambda) = \|\|P_Km \|phi>\|\|^2 | REACHABLE / UNREACHABLE |
-| Moment | Q + gamma\*LL^T > 0 | UNREACHABLE / INCONCLUSIVE |
+| Criterion | Method | Verdict |
+|-----------|--------|---------|
+| **Spectral** | Maximize S(lambda) = sum_n \|<u_n\|phi>* <u_n\|psi>\| | REACHABLE if S >= tau, else UNREACHABLE |
+| **Krylov** | Maximize R(lambda) = \|\|P_Km \|phi>\|\|^2 | REACHABLE if R >= tau, else UNREACHABLE |
+| **Moment** | Check Q + gamma*LL^T > 0 (no optimization) | UNREACHABLE if definite, else INCONCLUSIVE |
 
 ### Sweeps
 
@@ -74,7 +77,7 @@ scripts/tests/               Test suite (34 tests)
 
 ```bash
 python scripts/tests/run_all_tests.py         # Full suite
-python scripts/tests/run_all_tests.py --quick  # Quick mode (~1s)
+python scripts/tests/run_all_tests.py --quick  # Quick mode (~7s)
 ```
 
 ## License
@@ -83,4 +86,15 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Citation
 
-If you use this code in academic work, please cite using [CITATION.cff](CITATION.cff).
+If you use this code in academic work, please cite:
+
+```bibtex
+@software{reachability2026,
+  author = {TomaszAnd},
+  title = {Quantum Reachability Analysis},
+  year = {2026},
+  url = {https://github.com/TomaszAnd/reachability}
+}
+```
+
+See also [CITATION.cff](CITATION.cff).

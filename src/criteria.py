@@ -13,7 +13,7 @@ Class hierarchy:
     ├── OptimizableCriterion (ABC) — multi-restart L-BFGS-B optimizer
     │   ├── SpectralCriterion
     │   └── KrylovCriterion
-    └── MomentCriterion — no optimization, grid search over x
+    └── MomentCriterion — no optimization, checks γ=±1000
 
 Verdict system:
 - SpectralCriterion and KrylovCriterion return REACHABLE or UNREACHABLE

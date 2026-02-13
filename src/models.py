@@ -72,11 +72,6 @@ class QuantumModel(ABC):
         return len(self.basis)
 
     @property
-    def basis_size(self) -> int:
-        """Total number of operators in the full basis (L)."""
-        return len(self.basis)
-
-    @property
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
@@ -223,7 +218,7 @@ class CanonicalQuditModel(QuantumModel):
                 self.dim, include_identity=self.include_identity, seed=seed)
             return fresh.sample_submodel(k)
 
-        L = self.basis_size
+        L = self.K
         if k > L:
             raise ValueError(
                 f"Cannot sample {k} operators from canonical basis of size {L}")
@@ -359,7 +354,7 @@ class QubitGridModel(QuantumModel):
                 periodic=self.periodic, seed=seed)
             return fresh.sample_submodel(k)
 
-        L = self.basis_size
+        L = self.K
         if k < 2:
             raise ValueError(f"Need at least 2 operators, got k={k}")
 

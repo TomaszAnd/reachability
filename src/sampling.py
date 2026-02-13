@@ -95,9 +95,9 @@ class DensitySweep:
         psi = self.model.init_state()
 
         for K in K_values:
-            if K > self.model.basis_size:
+            if K > self.model.K:
                 if verbose:
-                    print(f"  K={K} > basis_size={self.model.basis_size}, skipping")
+                    print(f"  K={K} > K_max={self.model.K}, skipping")
                 continue
 
             if verbose:
