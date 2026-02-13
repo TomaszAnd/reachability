@@ -2,8 +2,8 @@
 """
 Comprehensive Test Suite for Reachability Analysis.
 
-Tests A through G covering correctness, sensitivity, monotonicity,
-consistency, gradients, reproducibility, and algebraic structure.
+Tests A through H covering correctness, sensitivity, monotonicity,
+consistency, gradients, reproducibility, algebraic structure, and data pipeline.
 
 Usage:
     # Run all tests
@@ -25,8 +25,8 @@ import numpy as np
 from typing import Dict, List, Tuple
 from scipy.linalg import null_space, expm
 
-from reach import models, mathematics, optimize, settings
-import qutip
+from src.models import CanonicalQuditModel, QubitGridModel, QuantumModel
+from src.criteria import SpectralCriterion, KrylovCriterion, MomentCriterion, Verdict
 
 # =============================================================================
 # Test Configuration
@@ -37,6 +37,41 @@ QUICK_MODE = False  # Reduced trials for fast validation
 
 def get_trials():
     return 5 if QUICK_MODE else 20
+
+
+def make_model_and_hams(d, K, ensemble, seed=42):
+    """Create a model and sample K operators from it. Returns list of numpy arrays."""
+    if ensemble == 'GUE':
+        # GUE: random dense Hermitian matrices
+        rng = np.random.RandomState(seed)
+        hams = []
+        for i in range(K):
+            h_seed = rng.randint(0, 2**31 - 1)
+            h_rng = np.random.RandomState(h_seed)
+            A = h_rng.randn(d, d) + 1j * h_rng.randn(d, d)
+            H = (A + A.conj().T) / np.sqrt(2)
+            hams.append(H)
+        return hams
+    elif ensemble == 'canonical':
+        model = CanonicalQuditModel(d, seed=seed)
+        sub = model.sample_submodel(K)
+        return sub.basis
+    else:
+        raise ValueError(f"Unknown ensemble: {ensemble}")
+
+
+def make_init_state(d):
+    """Create |0> state as numpy array."""
+    state = np.zeros(d, dtype=np.complex128)
+    state[0] = 1.0
+    return state
+
+
+def make_random_state(d, seed):
+    """Create a Haar-random state as numpy array."""
+    rng = np.random.RandomState(seed)
+    vec = rng.randn(d) + 1j * rng.randn(d)
+    return vec / np.linalg.norm(vec)
 
 
 # =============================================================================
@@ -57,15 +92,14 @@ def test_A_krylov_m_sensitivity():
     print("TEST A: Krylov m Sensitivity")
     print("=" * 60)
 
-    n_trials = get_trials()
     results = {'passed': 0, 'failed': 0, 'details': []}
 
     for d in [8, 16]:
         for ensemble in ['GUE', 'canonical']:
             for K in [5, d]:
-                hams = models.random_hamiltonian_ensemble(d, K, ensemble, seed=42)
-                psi = models.fock_state(d, 0)
-                phi = models.random_states(1, d, seed=100)[0]
+                hams = make_model_and_hams(d, K, ensemble, seed=42)
+                psi = make_init_state(d)
+                phi = make_random_state(d, seed=100)
 
                 lambdas = np.random.RandomState(42).uniform(-1, 1, K)
 
@@ -73,7 +107,8 @@ def test_A_krylov_m_sensitivity():
                 m_max = min(K, d)
                 scores = []
                 for m in range(1, m_max + 1):
-                    R = mathematics.krylov_score(lambdas, psi, phi, hams, m=m)
+                    kc = KrylovCriterion(hams, psi, phi, m=m)
+                    R = kc.evaluate(lambdas)
                     scores.append(R)
 
                 # Check monotonicity
@@ -92,17 +127,18 @@ def test_A_krylov_m_sensitivity():
                     results['failed'] += 1
                     print(f"    FAIL: Non-monotone! scores={scores}")
 
-    # Check GUE full rank → R=1
+    # Check GUE full rank -> R=1
     d = 8
-    hams = models.random_hamiltonian_ensemble(d, d, 'GUE', seed=42)
-    psi = models.fock_state(d, 0)
-    phi = models.random_states(1, d, seed=100)[0]
+    hams = make_model_and_hams(d, d, 'GUE', seed=42)
+    psi = make_init_state(d)
+    phi = make_random_state(d, seed=100)
     lambdas = np.random.RandomState(42).uniform(-1, 1, d)
-    R_full = mathematics.krylov_score(lambdas, psi, phi, hams, m=d)
+    kc = KrylovCriterion(hams, psi, phi, m=d)
+    R_full = kc.evaluate(lambdas)
 
     if R_full > 0.999:
         results['passed'] += 1
-        print(f"  GUE d={d} K={d} m=d: R={R_full:.6f} ≈ 1.0 PASS")
+        print(f"  GUE d={d} K={d} m=d: R={R_full:.6f} ~ 1.0 PASS")
     else:
         results['failed'] += 1
         print(f"  GUE d={d} K={d} m=d: R={R_full:.6f} != 1.0 FAIL")
@@ -119,9 +155,9 @@ def test_B_analytical_limits():
     Test B: Verify criteria match analytical predictions in known limits.
 
     Checks:
-    1. S(λ) = 1 when φ = exp(-iH(λ)t)|ψ⟩ (time-evolved state, any t)
-    2. Moment criterion detects unreachability for orthogonal states with K=1
-    3. R(λ) = 1 when φ ∈ K_m(H(λ), ψ) (Krylov member)
+    1. S(lambda) = 1 when phi = exp(-iH(lambda)t)|psi> (time-evolved state)
+    2. Moment criterion detects unreachability for K=2
+    3. R(lambda) = 1 when phi in K_m(H(lambda), psi) (Krylov member)
     """
     print("\n" + "=" * 60)
     print("TEST B: Analytical Limits")
@@ -129,56 +165,45 @@ def test_B_analytical_limits():
 
     results = {'passed': 0, 'failed': 0, 'details': []}
 
-    # Test B1: S(λ) = 1 for time-evolved target
+    # Test B1: S(lambda) = 1 for time-evolved target
     d, K = 8, 5
-    hams = models.random_hamiltonian_ensemble(d, K, 'GUE', seed=42)
-    psi = models.fock_state(d, 0)
+    hams = make_model_and_hams(d, K, 'GUE', seed=42)
+    psi = make_init_state(d)
 
     rng = np.random.RandomState(42)
     lambdas = rng.uniform(-1, 1, K)
     t = 2.0
 
     H = sum(l * H_k for l, H_k in zip(lambdas, hams))
-    U = (-1j * H * t).expm()
-    phi_evolved = U * psi
+    U = expm(-1j * H * t)
+    phi_evolved = U @ psi
 
-    S_evolved = mathematics.spectral_overlap(lambdas, psi, phi_evolved, hams)
+    sc = SpectralCriterion(hams, psi, phi_evolved)
+    S_evolved = sc.evaluate(lambdas)
 
     if abs(S_evolved - 1.0) < 1e-6:
         results['passed'] += 1
-        print(f"  B1: S(λ) for time-evolved target = {S_evolved:.8f} ≈ 1.0 PASS")
+        print(f"  B1: S(lambda) for time-evolved target = {S_evolved:.8f} ~ 1.0 PASS")
     else:
         results['failed'] += 1
-        print(f"  B1: S(λ) for time-evolved target = {S_evolved:.8f} != 1.0 FAIL")
+        print(f"  B1: S(lambda) for time-evolved target = {S_evolved:.8f} != 1.0 FAIL")
 
     # Test B2: Moment detects unreachability with K=2 (low K)
-    # Note: random_hamiltonian_ensemble requires K>=2
     d = 8
-    hams_2 = models.random_hamiltonian_ensemble(d, 2, 'GUE', seed=42)
-    psi = models.fock_state(d, 0)
+    hams_2 = make_model_and_hams(d, 2, 'GUE', seed=42)
+    psi = make_init_state(d)
 
     n_unreachable = 0
     n_trials = get_trials()
     for trial in range(n_trials):
-        phi = models.random_states(1, d, seed=200 + trial)[0]
+        phi = make_random_state(d, seed=200 + trial)
 
-        L = np.array([qutip.expect(H, phi) - qutip.expect(H, psi) for H in hams_2])
-        kernel = null_space(L.reshape(1, -1))
-
-        if kernel.size > 0:
-            K_mom = len(hams_2)
-            Q = np.zeros((K_mom, K_mom))
-            for i in range(K_mom):
-                for j in range(K_mom):
-                    anticomm = (hams_2[i] * hams_2[j] + hams_2[j] * hams_2[i]) / 2
-                    Q[i, j] = qutip.expect(anticomm, phi) - qutip.expect(anticomm, psi)
-            Q_proj = kernel.T @ Q @ kernel
-            eigvals = np.linalg.eigvalsh(Q_proj)
-            if bool(np.all(eigvals > 1e-10) or np.all(eigvals < -1e-10)):
-                n_unreachable += 1
+        mc = MomentCriterion(hams_2, psi, phi)
+        result = mc.is_reachable()
+        if result.verdict == Verdict.UNREACHABLE:
+            n_unreachable += 1
 
     frac_unreachable = n_unreachable / n_trials
-    # With K=2, many random targets should be unreachable (not enough control)
     if frac_unreachable > 0.1:
         results['passed'] += 1
         print(f"  B2: Moment K=2 unreachable fraction = {frac_unreachable:.2f} > 0.1 PASS")
@@ -186,25 +211,26 @@ def test_B_analytical_limits():
         results['failed'] += 1
         print(f"  B2: Moment K=2 unreachable fraction = {frac_unreachable:.2f} <= 0.1 FAIL")
 
-    # Test B3: R(λ) = 1 for Krylov member
+    # Test B3: R(lambda) = 1 for Krylov member
     d, K = 8, 5
-    hams = models.random_hamiltonian_ensemble(d, K, 'GUE', seed=42)
-    psi = models.fock_state(d, 0)
+    hams = make_model_and_hams(d, K, 'GUE', seed=42)
+    psi = make_init_state(d)
     lambdas = rng.uniform(-1, 1, K)
 
     H = sum(l * H_k for l, H_k in zip(lambdas, hams))
-    # phi = H|psi⟩ / ||H|psi⟩|| is in K_m for m >= 2
-    Hpsi = H * psi
-    phi_krylov = Hpsi / Hpsi.norm()
+    # phi = H|psi> / ||H|psi>|| is in K_m for m >= 2
+    Hpsi = H @ psi
+    phi_krylov = Hpsi / np.linalg.norm(Hpsi)
 
-    R_krylov = mathematics.krylov_score(lambdas, psi, phi_krylov, hams, m=min(K, d))
+    kc = KrylovCriterion(hams, psi, phi_krylov, m=min(K, d))
+    R_krylov = kc.evaluate(lambdas)
 
     if abs(R_krylov - 1.0) < 1e-6:
         results['passed'] += 1
-        print(f"  B3: R(λ) for Krylov member = {R_krylov:.8f} ≈ 1.0 PASS")
+        print(f"  B3: R(lambda) for Krylov member = {R_krylov:.8f} ~ 1.0 PASS")
     else:
         results['failed'] += 1
-        print(f"  B3: R(λ) for Krylov member = {R_krylov:.8f} != 1.0 FAIL")
+        print(f"  B3: R(lambda) for Krylov member = {R_krylov:.8f} != 1.0 FAIL")
 
     return results
 
@@ -217,8 +243,7 @@ def test_C_monotonicity_K():
     """
     Test C: P(unreachable) should be monotonically non-increasing in K.
 
-    More Hamiltonians → more control → easier to reach targets.
-    We check that P(unreachable | K+1) <= P(unreachable | K) + statistical noise.
+    More Hamiltonians -> more control -> easier to reach targets.
     """
     print("\n" + "=" * 60)
     print("TEST C: Monotonicity in K")
@@ -234,23 +259,22 @@ def test_C_monotonicity_K():
         P_unreachable = []
 
         for K in K_values:
-            hams = models.random_hamiltonian_ensemble(d, K, ensemble, seed=42)
-            psi = models.fock_state(d, 0)
+            hams = make_model_and_hams(d, K, ensemble, seed=42)
+            psi = make_init_state(d)
 
             unreachable = 0
             for trial in range(n_trials):
-                phi = models.random_states(1, d, seed=300 + trial)[0]
-                result = optimize.maximize_spectral_overlap(
-                    psi, phi, hams, maxiter=50, restarts=1, seed=trial
-                )
-                if result['best_value'] < tau:
+                phi = make_random_state(d, seed=300 + trial)
+                sc = SpectralCriterion(hams, psi, phi, tau=tau)
+                result = sc.is_reachable(maxiter=50, restarts=1, seed=trial)
+                if result.verdict == Verdict.UNREACHABLE:
                     unreachable += 1
 
             P = unreachable / n_trials
             P_unreachable.append(P)
 
         # Check monotonicity (with tolerance for statistical noise)
-        noise_tol = 2 * np.sqrt(0.25 / n_trials)  # 2σ binomial noise
+        noise_tol = 2 * np.sqrt(0.25 / n_trials)  # 2 sigma binomial noise
         is_monotone = all(
             P_unreachable[i + 1] <= P_unreachable[i] + noise_tol
             for i in range(len(P_unreachable) - 1)
@@ -276,12 +300,11 @@ def test_C_monotonicity_K():
 
 def test_D_pipeline_consistency():
     """
-    Test D: Verify parallel.py and direct computation give consistent results.
+    Test D: Same seeds produce same results.
 
     Compares:
-    1. Same seeds produce same Hamiltonians and states in both paths
-    2. Raw criterion scores (no optimization) match exactly
-    3. evaluate_single_trial produces consistent optimization results
+    1. Same seeds produce same Hamiltonians and states
+    2. Raw criterion scores match exactly
     """
     print("\n" + "=" * 60)
     print("TEST D: Pipeline Consistency")
@@ -293,18 +316,17 @@ def test_D_pipeline_consistency():
     seed = 42
 
     for ensemble in ['GUE', 'canonical']:
-        # Generate states and Hamiltonians directly (same way as evaluate_single_trial)
-        psi = models.fock_state(d, 0)
-        phi = models.random_states(1, d, seed=seed + 1000)[0]
-        hams = models.random_hamiltonian_ensemble(d, K, ensemble, seed=seed)
+        psi = make_init_state(d)
+        phi = make_random_state(d, seed=seed + 1000)
+        hams = make_model_and_hams(d, K, ensemble, seed=seed)
 
         # Generate again to verify reproducibility
-        phi2 = models.random_states(1, d, seed=seed + 1000)[0]
-        hams2 = models.random_hamiltonian_ensemble(d, K, ensemble, seed=seed)
+        phi2 = make_random_state(d, seed=seed + 1000)
+        hams2 = make_model_and_hams(d, K, ensemble, seed=seed)
 
         # D1: States/Hamiltonians match
-        phi_match = np.allclose(phi.full(), phi2.full())
-        hams_match = all(np.allclose(h1.full(), h2.full()) for h1, h2 in zip(hams, hams2))
+        phi_match = np.allclose(phi, phi2)
+        hams_match = all(np.allclose(h1, h2) for h1, h2 in zip(hams, hams2))
 
         if phi_match and hams_match:
             results['passed'] += 1
@@ -313,21 +335,25 @@ def test_D_pipeline_consistency():
             results['failed'] += 1
             print(f"  {ensemble}: State/Hamiltonian generation NOT reproducible FAIL")
 
-        # D2: Raw criterion scores match at fixed λ (no optimization)
+        # D2: Raw criterion scores match at fixed lambda (no optimization)
         rng = np.random.RandomState(seed)
         lambdas = rng.uniform(-1, 1, K)
 
-        S1 = mathematics.spectral_overlap(lambdas, psi, phi, hams)
-        S2 = mathematics.spectral_overlap(lambdas, psi, phi2, hams2)
+        sc1 = SpectralCriterion(hams, psi, phi)
+        sc2 = SpectralCriterion(hams2, psi, phi2)
+        S1 = sc1.evaluate(lambdas)
+        S2 = sc2.evaluate(lambdas)
 
-        R1 = mathematics.krylov_score(lambdas, psi, phi, hams, m=min(K, d))
-        R2 = mathematics.krylov_score(lambdas, psi, phi2, hams2, m=min(K, d))
+        kc1 = KrylovCriterion(hams, psi, phi, m=min(K, d))
+        kc2 = KrylovCriterion(hams2, psi, phi2, m=min(K, d))
+        R1 = kc1.evaluate(lambdas)
+        R2 = kc2.evaluate(lambdas)
 
         spec_diff = abs(S1 - S2)
         kry_diff = abs(R1 - R2)
 
-        detail = (f"{ensemble}: S(λ)={S1:.8f} vs {S2:.8f} (diff={spec_diff:.1e}), "
-                  f"R(λ)={R1:.8f} vs {R2:.8f} (diff={kry_diff:.1e})")
+        detail = (f"{ensemble}: S(lambda)={S1:.8f} vs {S2:.8f} (diff={spec_diff:.1e}), "
+                  f"R(lambda)={R1:.8f} vs {R2:.8f} (diff={kry_diff:.1e})")
         print(f"  {detail}")
         results['details'].append(detail)
 
@@ -350,10 +376,10 @@ def test_E_gradient_edge_cases():
     Test E: Verify analytical gradients handle edge cases.
 
     Checks:
-    1. Gradient at λ=0 (all zeros)
-    2. Gradient at λ=boundary (±1)
-    3. Gradient with degenerate eigenvalues
-    4. Gradient vs finite differences agreement
+    1. Gradient at lambda=0 (all zeros)
+    2. Gradient at lambda=boundary (+/-1)
+    3. Gradient vs finite differences agreement (spectral)
+    4. Gradient vs finite differences agreement (Krylov)
     """
     print("\n" + "=" * 60)
     print("TEST E: Gradient Edge Cases")
@@ -362,33 +388,35 @@ def test_E_gradient_edge_cases():
     results = {'passed': 0, 'failed': 0, 'details': []}
 
     d, K = 8, 3
-    hams = models.random_hamiltonian_ensemble(d, K, 'GUE', seed=42)
-    psi = models.fock_state(d, 0)
-    phi = models.random_states(1, d, seed=100)[0]
+    hams = make_model_and_hams(d, K, 'GUE', seed=42)
+    psi = make_init_state(d)
+    phi = make_random_state(d, seed=100)
 
-    # E1: Gradient at λ = 0
+    sc = SpectralCriterion(hams, psi, phi)
+
+    # E1: Gradient at lambda = 0
     lambdas_zero = np.zeros(K)
-    S, grad = mathematics.spectral_overlap_with_grad(lambdas_zero, psi, phi, hams)
+    S, grad = sc.evaluate(lambdas_zero, return_gradient=True)
     if np.all(np.isfinite(grad)):
         results['passed'] += 1
-        print(f"  E1: Gradient at λ=0: S={S:.4f}, ||grad||={np.linalg.norm(grad):.6f} PASS")
+        print(f"  E1: Gradient at lambda=0: S={S:.4f}, ||grad||={np.linalg.norm(grad):.6f} PASS")
     else:
         results['failed'] += 1
-        print(f"  E1: Gradient at λ=0 has NaN/Inf FAIL")
+        print(f"  E1: Gradient at lambda=0 has NaN/Inf FAIL")
 
-    # E2: Gradient at λ = boundary
+    # E2: Gradient at lambda = boundary
     lambdas_boundary = np.ones(K)
-    S, grad = mathematics.spectral_overlap_with_grad(lambdas_boundary, psi, phi, hams)
+    S, grad = sc.evaluate(lambdas_boundary, return_gradient=True)
     if np.all(np.isfinite(grad)):
         results['passed'] += 1
-        print(f"  E2: Gradient at λ=1: S={S:.4f}, ||grad||={np.linalg.norm(grad):.6f} PASS")
+        print(f"  E2: Gradient at lambda=1: S={S:.4f}, ||grad||={np.linalg.norm(grad):.6f} PASS")
     else:
         results['failed'] += 1
-        print(f"  E2: Gradient at λ=1 has NaN/Inf FAIL")
+        print(f"  E2: Gradient at lambda=1 has NaN/Inf FAIL")
 
-    # E3: Gradient vs finite differences
+    # E3: Spectral gradient vs finite differences
     lambdas = np.random.RandomState(42).uniform(-1, 1, K)
-    S, grad_analytical = mathematics.spectral_overlap_with_grad(lambdas, psi, phi, hams)
+    S, grad_analytical = sc.evaluate(lambdas, return_gradient=True)
 
     eps = 1e-6
     grad_fd = np.zeros(K)
@@ -397,8 +425,8 @@ def test_E_gradient_edge_cases():
         lam_plus[i] += eps
         lam_minus = lambdas.copy()
         lam_minus[i] -= eps
-        S_plus = mathematics.spectral_overlap(lam_plus, psi, phi, hams)
-        S_minus = mathematics.spectral_overlap(lam_minus, psi, phi, hams)
+        S_plus = sc.evaluate(lam_plus)
+        S_minus = sc.evaluate(lam_minus)
         grad_fd[i] = (S_plus - S_minus) / (2 * eps)
 
     max_error = np.max(np.abs(grad_analytical - grad_fd))
@@ -411,7 +439,8 @@ def test_E_gradient_edge_cases():
 
     # E4: Krylov gradient vs finite differences
     m = min(K, d)
-    R, grad_R = mathematics.krylov_score_with_grad(lambdas, psi, phi, hams, m=m)
+    kc = KrylovCriterion(hams, psi, phi, m=m)
+    R, grad_R = kc.evaluate(lambdas, return_gradient=True)
 
     grad_R_fd = np.zeros(K)
     for i in range(K):
@@ -419,8 +448,8 @@ def test_E_gradient_edge_cases():
         lam_plus[i] += eps
         lam_minus = lambdas.copy()
         lam_minus[i] -= eps
-        R_plus = mathematics.krylov_score(lam_plus, psi, phi, hams, m=m)
-        R_minus = mathematics.krylov_score(lam_minus, psi, phi, hams, m=m)
+        R_plus = kc.evaluate(lam_plus)
+        R_minus = kc.evaluate(lam_minus)
         grad_R_fd[i] = (R_plus - R_minus) / (2 * eps)
 
     max_error_R = np.max(np.abs(grad_R - grad_R_fd))
@@ -440,12 +469,12 @@ def test_E_gradient_edge_cases():
 
 def test_F_reproducibility():
     """
-    Test F: Same seed → identical results across runs.
+    Test F: Same seed -> identical results across runs.
 
     Checks:
     1. Same Hamiltonians from same seed
     2. Same optimization result from same seed
-    3. Same parallel_evaluate result from same seed
+    3. DensitySweep reproducibility
     """
     print("\n" + "=" * 60)
     print("TEST F: Reproducibility")
@@ -455,11 +484,11 @@ def test_F_reproducibility():
     d, K = 8, 5
 
     # F1: Hamiltonian generation reproducibility
-    hams1 = models.random_hamiltonian_ensemble(d, K, 'GUE', seed=42)
-    hams2 = models.random_hamiltonian_ensemble(d, K, 'GUE', seed=42)
+    hams1 = make_model_and_hams(d, K, 'GUE', seed=42)
+    hams2 = make_model_and_hams(d, K, 'GUE', seed=42)
 
     all_match = all(
-        np.allclose(h1.full(), h2.full()) for h1, h2 in zip(hams1, hams2)
+        np.allclose(h1, h2) for h1, h2 in zip(hams1, hams2)
     )
     if all_match:
         results['passed'] += 1
@@ -469,40 +498,45 @@ def test_F_reproducibility():
         print(f"  F1: Hamiltonian generation NOT reproducible FAIL")
 
     # F2: Optimization reproducibility
-    psi = models.fock_state(d, 0)
-    phi = models.random_states(1, d, seed=100)[0]
+    psi = make_init_state(d)
+    phi = make_random_state(d, seed=100)
 
-    r1 = optimize.maximize_spectral_overlap(psi, phi, hams1, maxiter=50, restarts=1, seed=42)
-    r2 = optimize.maximize_spectral_overlap(psi, phi, hams2, maxiter=50, restarts=1, seed=42)
+    sc1 = SpectralCriterion(hams1, psi, phi, tau=0.99)
+    sc2 = SpectralCriterion(hams2, psi, phi, tau=0.99)
+    r1 = sc1.is_reachable(maxiter=50, restarts=1, seed=42)
+    r2 = sc2.is_reachable(maxiter=50, restarts=1, seed=42)
 
-    if abs(r1['best_value'] - r2['best_value']) < 1e-10:
+    if abs(r1.score - r2.score) < 1e-10:
         results['passed'] += 1
-        print(f"  F2: Optimization reproducible (S*={r1['best_value']:.8f}) PASS")
+        print(f"  F2: Optimization reproducible (S*={r1.score:.8f}) PASS")
     else:
         results['failed'] += 1
         print(f"  F2: Optimization NOT reproducible "
-              f"({r1['best_value']:.8f} vs {r2['best_value']:.8f}) FAIL")
+              f"({r1.score:.8f} vs {r2.score:.8f}) FAIL")
 
-    # F3: parallel_evaluate reproducibility
-    from reach.parallel import parallel_evaluate
+    # F3: DensitySweep reproducibility
+    from src.sampling import DensitySweep, SweepConfig
 
-    res1 = parallel_evaluate('GUE', d, K, 0.99, n_trials=5, seed_base=42,
-                             criteria=['spectral', 'krylov'], n_jobs=1)
-    res2 = parallel_evaluate('GUE', d, K, 0.99, n_trials=5, seed_base=42,
-                             criteria=['spectral', 'krylov'], n_jobs=1)
+    config = SweepConfig(n_hamiltonians=3, n_targets=2, maxiter=30, restarts=1)
+    model1 = CanonicalQuditModel(d, seed=42)
+    model2 = CanonicalQuditModel(d, seed=42)
 
-    spec_match = abs(res1['spectral_P'] - res2['spectral_P']) < 1e-10
-    kry_match = abs(res1['krylov_P'] - res2['krylov_P']) < 1e-10
+    sweep1 = DensitySweep(model1, config)
+    sweep2 = DensitySweep(model2, config)
 
-    if spec_match and kry_match:
+    df1 = sweep1.run([3, 5], criteria=['spectral'], verbose=False)
+    df2 = sweep2.run([3, 5], criteria=['spectral'], verbose=False)
+
+    spec_match = np.allclose(df1['spectral_P'].values, df2['spectral_P'].values)
+
+    if spec_match:
         results['passed'] += 1
-        print(f"  F3: parallel_evaluate reproducible "
-              f"(S_P={res1['spectral_P']:.2f}, R_P={res1['krylov_P']:.2f}) PASS")
+        print(f"  F3: DensitySweep reproducible "
+              f"(spectral_P={df1['spectral_P'].values}) PASS")
     else:
         results['failed'] += 1
-        print(f"  F3: parallel_evaluate NOT reproducible "
-              f"(S_P: {res1['spectral_P']:.4f} vs {res2['spectral_P']:.4f}, "
-              f"R_P: {res1['krylov_P']:.4f} vs {res2['krylov_P']:.4f}) FAIL")
+        print(f"  F3: DensitySweep NOT reproducible "
+              f"({df1['spectral_P'].values} vs {df2['spectral_P'].values}) FAIL")
 
     return results
 
@@ -515,17 +549,11 @@ def test_G_lie_algebra():
     """
     Test G: Commutator-based reachability from Lie algebra theory.
 
-    For a set of Hamiltonians {H_1, ..., H_K}, the dynamical Lie algebra
-    L = Lie({iH_1, ..., iH_K}) determines the reachable set.
-
-    If dim(L) = d² - 1 (full su(d)), ALL states are reachable.
-    If dim(L) < d² - 1, there exist unreachable states.
-
-    We verify:
-    1. For K >= d² GUE Hamiltonians, Lie algebra is full → all states reachable
-    2. For K = 1, Lie algebra is 1-dimensional → most states unreachable
-    3. Commutators [H_i, H_j] generate new directions in Lie algebra
-    4. Spectral/Krylov criteria agree with Lie algebra dimension predictions
+    Checks:
+    1. For K >= d^2 GUE Hamiltonians, Lie algebra is full
+    2. For K=1, Lie algebra is small
+    3. Commutators generate new directions
+    4. Full Lie algebra -> all targets reachable
     """
     print("\n" + "=" * 60)
     print("TEST G: Commutator / Lie Algebra Structure")
@@ -536,27 +564,23 @@ def test_G_lie_algebra():
     d = 4  # Small for tractability
 
     # G1: Full su(d) with many generators
-    K_full = d * d  # More than enough generators
-    hams = models.random_hamiltonian_ensemble(d, K_full, 'GUE', seed=42)
+    K_full = d * d
+    hams = make_model_and_hams(d, K_full, 'GUE', seed=42)
 
     # Compute Lie algebra dimension by generating commutators
     lie_basis = []
     for H in hams:
-        H_mat = H.full()
-        # Use traceless part (su(d) is traceless)
-        H_traceless = H_mat - np.trace(H_mat) / d * np.eye(d)
+        H_traceless = H - np.trace(H) / d * np.eye(d)
         lie_basis.append(1j * H_traceless)
 
     # Add commutators iteratively
     new_elements = list(lie_basis)
-    for _ in range(3):  # 3 rounds of commutators
+    for _ in range(3):
         next_new = []
         for A in new_elements:
             for B in lie_basis:
                 comm = A @ B - B @ A
-                # Check if linearly independent of existing basis
                 if len(lie_basis) < d * d - 1:
-                    # Vectorize and check rank
                     vecs = np.array([b.flatten() for b in lie_basis] + [comm.flatten()])
                     rank = np.linalg.matrix_rank(vecs, tol=1e-10)
                     if rank > len(lie_basis):
@@ -571,21 +595,19 @@ def test_G_lie_algebra():
 
     if lie_dim >= expected_dim - 1:
         results['passed'] += 1
-        print(f"  G1: K={K_full} GUE → Lie dim = {lie_dim} "
+        print(f"  G1: K={K_full} GUE -> Lie dim = {lie_dim} "
               f"(su({d}) = {expected_dim}) PASS")
     else:
         results['failed'] += 1
-        print(f"  G1: K={K_full} GUE → Lie dim = {lie_dim} "
+        print(f"  G1: K={K_full} GUE -> Lie dim = {lie_dim} "
               f"(expected {expected_dim}) FAIL")
 
-    # G2: Single generator → small Lie algebra
-    # Create a single Hamiltonian manually (random_hamiltonian_ensemble requires K>=2)
+    # G2: Single generator -> small Lie algebra
     rng_g2 = np.random.RandomState(42)
     H1_raw = rng_g2.randn(d, d) + 1j * rng_g2.randn(d, d)
-    H1_mat = (H1_raw + H1_raw.conj().T) / 2  # Hermitianize
+    H1_mat = (H1_raw + H1_raw.conj().T) / 2
     H1_traceless = H1_mat - np.trace(H1_mat) / d * np.eye(d)
 
-    # H, H², H³, ... should all be in span of H powers
     lie_basis_1 = [1j * H1_traceless]
     for power in range(2, d + 1):
         Hp = np.linalg.matrix_power(H1_traceless, power)
@@ -595,22 +617,20 @@ def test_G_lie_algebra():
     vecs = np.array([b.flatten() for b in lie_basis_1])
     lie_dim_1 = np.linalg.matrix_rank(vecs, tol=1e-10)
 
-    # For a single generic Hermitian matrix, the Lie algebra generated
-    # by {iH} has dimension = d-1 (diagonal matrices in eigenbasis)
     if lie_dim_1 <= d:
         results['passed'] += 1
-        print(f"  G2: K=1 GUE → Lie dim = {lie_dim_1} <= {d} PASS")
+        print(f"  G2: K=1 GUE -> Lie dim = {lie_dim_1} <= {d} PASS")
     else:
         results['failed'] += 1
-        print(f"  G2: K=1 GUE → Lie dim = {lie_dim_1} > {d} FAIL")
+        print(f"  G2: K=1 GUE -> Lie dim = {lie_dim_1} > {d} FAIL")
 
     # G3: Commutator generates new direction
     K = 2
-    hams_2 = models.random_hamiltonian_ensemble(d, K, 'GUE', seed=42)
-    H1 = hams_2[0].full()
-    H2 = hams_2[1].full()
+    hams_2 = make_model_and_hams(d, K, 'GUE', seed=42)
+    H1 = hams_2[0]
+    H2 = hams_2[1]
 
-    comm12 = H1 @ H2 - H2 @ H1  # = i[iH1, iH2] up to factor
+    comm12 = H1 @ H2 - H2 @ H1
 
     vecs_before = np.array([H1.flatten(), H2.flatten()])
     rank_before = np.linalg.matrix_rank(vecs_before, tol=1e-10)
@@ -621,32 +641,29 @@ def test_G_lie_algebra():
     if rank_after > rank_before:
         results['passed'] += 1
         print(f"  G3: [H1,H2] generates new direction: "
-              f"rank {rank_before} → {rank_after} PASS")
+              f"rank {rank_before} -> {rank_after} PASS")
     else:
         results['failed'] += 1
         print(f"  G3: [H1,H2] does NOT generate new direction FAIL")
 
     # G4: Agreement with spectral criterion
-    # Full Lie algebra → all targets reachable → S* ≈ 1 for all φ
-    psi = models.fock_state(d, 0)
+    psi = make_init_state(d)
     n_reachable = 0
     n_test = get_trials()
     for trial in range(n_test):
-        phi = models.random_states(1, d, seed=500 + trial)[0]
-        result = optimize.maximize_spectral_overlap(
-            psi, phi, hams[:d*d],  # Use all K_full generators
-            maxiter=100, restarts=2, seed=trial,
-        )
-        if result['best_value'] >= 0.99:
+        phi = make_random_state(d, seed=500 + trial)
+        sc = SpectralCriterion(hams[:d*d], psi, phi, tau=0.99)
+        result = sc.is_reachable(maxiter=100, restarts=2, seed=trial)
+        if result.verdict == Verdict.REACHABLE:
             n_reachable += 1
 
     frac_reachable = n_reachable / n_test
     if frac_reachable >= 0.8:
         results['passed'] += 1
-        print(f"  G4: Full Lie algebra → {frac_reachable:.0%} reachable (S*≥0.99) PASS")
+        print(f"  G4: Full Lie algebra -> {frac_reachable:.0%} reachable (S*>=0.99) PASS")
     else:
         results['failed'] += 1
-        print(f"  G4: Full Lie algebra → {frac_reachable:.0%} reachable FAIL")
+        print(f"  G4: Full Lie algebra -> {frac_reachable:.0%} reachable FAIL")
 
     return results
 
@@ -690,11 +707,9 @@ def test_H_data_pipeline():
 
         df = pd.read_csv(fpath)
 
-        # Check columns
         required_cols = ['ensemble', 'd', 'K', 'rho', 'tau', 'spectral_P', 'moment_P']
         missing = [c for c in required_cols if c not in df.columns]
 
-        # Check data ranges
         valid_d = df['d'].isin([8, 16, 32, 64]).all()
         valid_rho = (df['rho'] > 0).all() and (df['rho'] < 1).all()
         valid_P_spec = (df['spectral_P'] >= 0).all() and (df['spectral_P'] <= 1).all()
@@ -723,11 +738,8 @@ def test_H_data_pipeline():
 
         df = pd.read_csv(fpath)
 
-        # Check m = min(K, d) for every row
         expected_m = df.apply(lambda r: min(r['K'], r['d']), axis=1)
         m_correct = (df['m'] == expected_m).all()
-
-        # Check krylov_P in valid range
         valid_P = (df['krylov_P'] >= 0).all() and (df['krylov_P'] <= 1).all()
 
         if m_correct and valid_P:
@@ -740,7 +752,7 @@ def test_H_data_pipeline():
                 bad_rows = df[df['m'] != expected_m]
                 print(f"      {len(bad_rows)} rows have incorrect m values")
 
-    # H3: Merged data consistency (simulated merge check)
+    # H3: Merged data consistency
     canonical_overnight = overnight_dir / 'canonical_overnight_20260128_224236.csv'
     canonical_krylov = krylov_dir / 'canonical_krylov_corrected_20260204_222726.csv'
 
@@ -748,7 +760,6 @@ def test_H_data_pipeline():
         df_over = pd.read_csv(canonical_overnight)
         df_kry = pd.read_csv(canonical_krylov)
 
-        # Aggregate overnight to remove duplicates (same as plot script)
         df_over['K'] = df_over['K'].astype(int)
         df_over['d'] = df_over['d'].astype(int)
 
@@ -764,14 +775,12 @@ def test_H_data_pipeline():
         df_kry['K'] = df_kry['K'].astype(int)
         df_kry['d'] = df_kry['d'].astype(int)
 
-        # Drop duplicates from corrected Krylov before merge (keep first)
         krylov_merge = df_kry[['d', 'K', 'krylov_P']].drop_duplicates(subset=['d', 'K'])
-        df_merged = df_over_agg.merge(krylov_merge, on=['d', 'K'], how='left', suffixes=('_old', ''))
+        df_merged = df_over_agg.merge(krylov_merge, on=['d', 'K'], how='left',
+                                       suffixes=('_old', ''))
 
-        # After aggregation, check for NEW duplicates (shouldn't be any)
         dup_count = df_merged.duplicated(subset=['d', 'K', 'tau']).sum()
 
-        # Check P values are valid
         valid_merged_P = True
         for col in ['spectral_P', 'moment_P']:
             if col in df_merged.columns:
@@ -813,7 +822,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Comprehensive Test Suite')
     parser.add_argument('--test', type=str, default=None,
-                        help='Run specific test (A-G)')
+                        help='Run specific test (A-H)')
     parser.add_argument('--quick', action='store_true',
                         help='Quick mode (reduced trials)')
     args = parser.parse_args()
@@ -842,6 +851,8 @@ def main():
             all_results[test_id] = result
         except Exception as e:
             print(f"\n  TEST {test_id} EXCEPTION: {e}")
+            import traceback
+            traceback.print_exc()
             all_results[test_id] = {'passed': 0, 'failed': 1, 'details': [str(e)]}
 
     # Summary
@@ -859,7 +870,7 @@ def main():
         total_passed += p
         total_failed += f
         status = "PASS" if f == 0 else "FAIL"
-        print(f"  Test {test_id} ({name}): {p} passed, {f} failed → {status}")
+        print(f"  Test {test_id} ({name}): {p} passed, {f} failed -> {status}")
 
     print(f"\nTotal: {total_passed} passed, {total_failed} failed")
     print(f"Time: {elapsed:.1f}s")
