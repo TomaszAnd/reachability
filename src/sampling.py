@@ -116,7 +116,7 @@ class DensitySweep:
             child_seeds = self.model._seed_seq.spawn(cfg.n_hamiltonians)
 
             for h_idx in range(cfg.n_hamiltonians):
-                sub_seed = child_seeds[h_idx].entropy
+                sub_seed = int(child_seeds[h_idx].generate_state(1)[0])
                 sub_model = self.model.sample_submodel(K, seed=sub_seed)
 
                 for t_idx in range(cfg.n_targets):

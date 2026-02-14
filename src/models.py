@@ -154,7 +154,7 @@ class _SubModel(QuantumModel):
             selected_indices=indices,
             description=f"Sub-submodel: {k} of {self.K} operators",
         )
-        child_seed = self._seed_seq.spawn(1)[0].entropy
+        child_seed = int(self._seed_seq.spawn(1)[0].generate_state(1)[0])
         return _SubModel(self.dim, ops, meta, seed=child_seed)
 
 
@@ -233,7 +233,7 @@ class CanonicalQuditModel(QuantumModel):
             selected_indices=indices,
             description=f"Canonical submodel: {k} of {L} operators (d={self.dim})",
         )
-        child_seed = self._seed_seq.spawn(1)[0].entropy
+        child_seed = int(self._seed_seq.spawn(1)[0].generate_state(1)[0])
         return _SubModel(self.dim, ops, meta, seed=child_seed)
 
 
@@ -373,5 +373,5 @@ class QubitGridModel(QuantumModel):
             description=f"GEO2 submodel: {k} random Hamiltonians "
                         f"(lattice {self.nx}x{self.ny}, d={self.dim})",
         )
-        child_seed = self._seed_seq.spawn(1)[0].entropy
+        child_seed = int(self._seed_seq.spawn(1)[0].generate_state(1)[0])
         return _SubModel(self.dim, ops, meta, seed=child_seed)
