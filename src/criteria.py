@@ -451,7 +451,7 @@ class MomentCriterion(ReachabilityCriterion):
     Tests whether Q + gamma L L^T is positive definite for some gamma,
     where:
         L[k] = <H_k>_phi - <H_k>_psi
-        Q[k,m] = <{H_k, H_m}/2>_phi - <{H_k, H_m}/2>_psi
+        Q[k,m] = <{H_k, H_m}>_phi - <{H_k, H_m}>_psi  ({A,B} = AB+BA)
 
     For large |gamma|, gamma*LL^T dominates except on ker(L), so
     M(gamma) > 0 effectively checks Q's positive definiteness on ker(L).
@@ -504,10 +504,10 @@ class MomentCriterion(ReachabilityCriterion):
         L = np.real(np.einsum('d,kd->k', phi.conj(), Hphi)
                     - np.einsum('d,kd->k', psi.conj(), Hpsi))
 
-        # Q[k,m] = Re(<{H_k, H_m}/2>_phi - <{H_k, H_m}/2>_psi)
-        # = Re((Hphi_k^H @ Hphi_m + Hphi_m^H @ Hphi_k)/2 - same for psi)
-        # Since Q is real-symmetric: Q[k,m] = Re(Hphi_k^H @ Hphi_m) - Re(Hpsi_k^H @ Hpsi_m)
-        Q = np.real(Hphi.conj() @ Hphi.T) - np.real(Hpsi.conj() @ Hpsi.T)
+        # Q[k,m] = <{H_k, H_m}>_phi - <{H_k, H_m}>_psi
+        # where {A,B} = AB + BA (paper Eq. 6, no 1/2 factor)
+        # For Hermitian operators: <{H_k,H_m}> = 2*Re(<H_k H_m>)
+        Q = 2 * (np.real(Hphi.conj() @ Hphi.T) - np.real(Hpsi.conj() @ Hpsi.T))
 
         L_outer = np.outer(L, L)
         tol = 1e-10
