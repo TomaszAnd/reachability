@@ -113,7 +113,7 @@ class QuantumModel(ABC):
         Factory method.
 
         Args:
-            family_type: 'canonical' or 'geometric_local' (aliases: 'geo2', 'qubit_grid')
+            family_type: 'canonical' or 'qubit_grid' (alias: 'geometric_local')
             dim: Hilbert space dimension
             **kwargs: Passed to the specific model constructor
 
@@ -123,7 +123,7 @@ class QuantumModel(ABC):
         ft = family_type.lower()
         if ft == "canonical":
             return CanonicalQuditModel(dim, **kwargs)
-        elif ft in ("geometric_local", "geo2", "qubit_grid"):
+        elif ft in ("geometric_local", "qubit_grid"):
             return QubitGridModel(dim, **kwargs)
         raise ValueError(f"Unknown family type: {family_type!r}")
 
@@ -237,8 +237,8 @@ class CanonicalQuditModel(QuantumModel):
         return _SubModel(self.dim, ops, meta, seed=child_seed)
 
 
-# GEO2 lattice configs: dimension -> (nx, ny)
-GEO2_LATTICE_CONFIGS = {
+# Default lattice configs: dimension -> (nx, ny)
+LATTICE_CONFIGS = {
     8: (1, 3),
     16: (2, 2),
     32: (1, 5),
@@ -264,12 +264,12 @@ class QubitGridModel(QuantumModel):
                  seed: Optional[int] = None):
         # Infer lattice dimensions if not provided
         if nx is None or ny is None:
-            if dim in GEO2_LATTICE_CONFIGS:
-                nx, ny = GEO2_LATTICE_CONFIGS[dim]
+            if dim in LATTICE_CONFIGS:
+                nx, ny = LATTICE_CONFIGS[dim]
             else:
                 raise ValueError(
                     f"Cannot infer lattice for d={dim}. "
-                    f"Provide nx, ny explicitly. Known dims: {list(GEO2_LATTICE_CONFIGS.keys())}")
+                    f"Provide nx, ny explicitly. Known dims: {list(LATTICE_CONFIGS.keys())}")
 
         self.nx = nx
         self.ny = ny
@@ -341,12 +341,10 @@ class QubitGridModel(QuantumModel):
 
     def sample_submodel(self, k: int, seed: Optional[int] = None) -> QuantumModel:
         """
-        Create a submodel by sampling k random Hamiltonians.
+        Sample k operators from the Pauli basis P_2(G) without replacement.
 
-        Each sampled Hamiltonian is a random weighted sum of all L basis operators:
-        H_i = (1/sqrt(L)) sum_a g_a^(i) P_a, where g_a ~ N(0,1).
-
-        This matches the GEO2 definition from arXiv:2510.06321.
+        Each H_k is a single Pauli operator (1-local or 2-local term),
+        matching the paper Sec. IV.B approach.
         """
         if seed is not None:
             fresh = QubitGridModel(
@@ -355,22 +353,19 @@ class QubitGridModel(QuantumModel):
             return fresh.sample_submodel(k)
 
         L = self.K
+        if k > L:
+            raise ValueError(
+                f"Cannot sample {k} operators from QubitGrid basis of size {L}")
         if k < 2:
             raise ValueError(f"Need at least 2 operators, got k={k}")
 
-        child_rngs = [
-            np.random.default_rng(s) for s in self._seed_seq.spawn(k)
-        ]
-
-        ops = []
-        for rng in child_rngs:
-            coeffs = rng.standard_normal(L) / np.sqrt(L)
-            H = sum(c * B for c, B in zip(coeffs, self.basis))
-            ops.append(H)
+        indices = self._rng.choice(L, size=k, replace=False)
+        ops = [self.basis[i] for i in indices]
 
         meta = ModelMetadata(
             parent_basis_size=L,
-            description=f"GEO2 submodel: {k} random Hamiltonians "
+            selected_indices=indices,
+            description=f"QubitGrid submodel: {k} of {L} operators "
                         f"(lattice {self.nx}x{self.ny}, d={self.dim})",
         )
         child_seed = int(self._seed_seq.spawn(1)[0].generate_state(1)[0])

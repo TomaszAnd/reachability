@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Overnight production run for GEO2 ensemble.
+Overnight production run for QubitGrid (Pauli subset selection).
 
 Includes d=64 with optimized settings.
 Generates publication-quality data with:
@@ -44,7 +44,7 @@ CONFIG = {
         64: {'nx': 2, 'ny': 3},
     },
 
-    # Dimension-specific K ranges (GEO2 transitions earlier)
+    # Dimension-specific K ranges
     'K_values': {
         8: sorted(set(max(2, int(round(rho * 64)))
                        for rho in np.concatenate([
@@ -72,7 +72,7 @@ CONFIG = {
                         ]))),
     },
 
-    # Criteria (skip Krylov for GEO2 d=64 - uninformative and slow)
+    # Criteria (skip Krylov for d=64 - slow)
     'criteria': {
         8: ['spectral', 'krylov', 'moment'],
         16: ['spectral', 'krylov', 'moment'],
