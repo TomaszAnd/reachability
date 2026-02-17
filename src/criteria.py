@@ -34,7 +34,7 @@ from scipy.optimize import minimize
 
 from .math_utils import (
     OVERLAP_TOLERANCE, KRYLOV_BREAKDOWN_TOL,
-    eigendecompose, clip_to_bounds, construct_hamiltonian,
+    eigendecompose, clip_to_bounds,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,7 @@ class ReachabilityCriterion(ABC):
         self.tau = tau
         self.K = len(self.hams)
         self.dim = self.hams[0].shape[0]
+        self._hams_array = np.stack(self.hams)  # (K, d, d) for fast einsum
 
     @abstractmethod
     def evaluate(
@@ -178,6 +179,8 @@ class OptimizableCriterion(ReachabilityCriterion):
                 if current > best_value:
                     best_value = current
                     best_x = result.x.copy()
+                if best_value >= self.tau:
+                    break  # Already reachable, skip remaining restarts
             except Exception as e:
                 logger.debug(f"Optimization restart failed: {e}")
                 continue
@@ -248,7 +251,7 @@ class SpectralCriterion(OptimizableCriterion):
             6. (If gradient) Perturbation theory for dS/dlambda_k
         """
         # Step 1: Build combined Hamiltonian
-        H = construct_hamiltonian(lambdas, self.hams)
+        H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
 
         # Step 2: Eigendecomposition
         try:
@@ -286,12 +289,17 @@ class SpectralCriterion(OptimizableCriterion):
 
         # dS/dlambda_k = sum_n Re[sign(c_n)* dc_n/dlambda_k]
         grad = np.zeros(self.K)
+        U = eigenvectors
+        weighted_inv_psi = inv_delta_E * psi_coeffs[None, :]  # (d, d)
+        weighted_inv_phi = inv_delta_E * phi_coeffs[None, :]  # (d, d)
+        sign_c_conj = sign_c.conj()
+
         for k in range(self.K):
-            Hk_eig = eigenvectors.conj().T @ self.hams[k] @ eigenvectors
-            dpsi = np.sum(Hk_eig * inv_delta_E * psi_coeffs[None, :], axis=1)
-            dphi = np.sum(Hk_eig * inv_delta_E * phi_coeffs[None, :], axis=1)
+            Hk_eig = U.conj().T @ self.hams[k] @ U
+            dpsi = np.sum(Hk_eig * weighted_inv_psi, axis=1)
+            dphi = np.sum(Hk_eig * weighted_inv_phi, axis=1)
             dc = dphi.conj() * psi_coeffs + phi_coeffs.conj() * dpsi
-            grad[k] = np.real(np.sum(sign_c.conj() * dc))
+            grad[k] = np.real(np.sum(sign_c_conj * dc))
 
         return S, grad
 
@@ -373,7 +381,7 @@ class KrylovCriterion(OptimizableCriterion):
             5. (If gradient) Differentiate through Arnoldi iteration
         """
         # Steps 1-4: Score computation
-        H = construct_hamiltonian(lambdas, self.hams)
+        H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
         V = self._krylov_basis(H)
 
         coeffs = V.conj().T @ self.phi
@@ -396,20 +404,19 @@ class KrylovCriterion(OptimizableCriterion):
 
         actual_m = m
         for i in range(1, m):
-            w = H @ V_arn[:, i - 1]
-            dw = np.zeros((self.K, d), dtype=np.complex128)
-            for k in range(self.K):
-                dw[k] = self.hams[k] @ V_arn[:, i - 1] + H @ dV[k, :, i - 1]
+            v_prev = V_arn[:, i - 1]
+            w = H @ v_prev
+            # dw[k] = H_k @ v_prev + H @ dV[k, :, i-1]  (vectorized over k)
+            dw = self._hams_array @ v_prev + (H @ dV[:, :, i - 1].T).T
 
-            h = V_arn[:, :i].conj().T @ w
-            dh = np.zeros((self.K, i), dtype=np.complex128)
-            for k in range(self.K):
-                dh[k] = V_arn[:, :i].conj().T @ dw[k] + dV[k, :, :i].conj().T @ w
+            V_block = V_arn[:, :i]  # (d, i)
+            h = V_block.conj().T @ w  # (i,)
+            # dh[k] = V_block^H @ dw[k] + dV[k,:,:i]^H @ w
+            dh = dw @ V_block.conj() + np.einsum('kdi,d->ki', dV[:, :, :i].conj(), w)
 
-            w_tilde = w - V_arn[:, :i] @ h
-            dw_tilde = np.zeros((self.K, d), dtype=np.complex128)
-            for k in range(self.K):
-                dw_tilde[k] = dw[k] - V_arn[:, :i] @ dh[k] - dV[k, :, :i] @ h
+            w_tilde = w - V_block @ h  # (d,)
+            # dw_tilde[k] = dw[k] - V_block @ dh[k] - dV[k,:,:i] @ h
+            dw_tilde = dw - dh @ V_block.T - np.einsum('kdi,i->kd', dV[:, :, :i], h)
 
             norm_w = np.linalg.norm(w_tilde)
             if norm_w < KRYLOV_BREAKDOWN_TOL:
@@ -418,18 +425,17 @@ class KrylovCriterion(OptimizableCriterion):
 
             V_arn[:, i] = w_tilde / norm_w
             v_i = V_arn[:, i]
-            for k in range(self.K):
-                proj = np.real(np.vdot(v_i, dw_tilde[k]))
-                dV[k, :, i] = (dw_tilde[k] - proj * v_i) / norm_w
+            # proj[k] = Re(v_i^H @ dw_tilde[k])
+            proj = np.real(dw_tilde @ v_i.conj())  # (K,)
+            dV[:, :, i] = (dw_tilde - proj[:, None] * v_i[None, :]) / norm_w
 
         V_arn = V_arn[:, :actual_m]
         dV = dV[:, :, :actual_m]
 
-        c = V_arn.conj().T @ self.phi
-        grad = np.zeros(self.K)
-        for k in range(self.K):
-            dc = dV[k].conj().T @ self.phi
-            grad[k] = 2.0 * np.real(np.vdot(c, dc))
+        c = V_arn.conj().T @ self.phi  # (actual_m,)
+        # dc[k] = dV[k]^H @ phi
+        dc_all = np.einsum('kdi,d->ki', dV.conj(), self.phi)  # (K, actual_m)
+        grad = 2.0 * np.real(np.einsum('i,ki->k', c.conj(), dc_all))
 
         return R, grad
 
@@ -487,26 +493,21 @@ class MomentCriterion(ReachabilityCriterion):
         difference matrix Q, then tests positive definiteness at
         gamma = +-1000 (large values that probe Q's definiteness on ker(L)).
         """
-        K = self.K
         psi = self.psi
         phi = self.phi
+        hams = self._hams_array  # (K, d, d)
 
         # L[k] = <H_k>_phi - <H_k>_psi (first moment difference)
-        L = np.array([
-            np.real(phi.conj() @ self.hams[k] @ phi
-                    - psi.conj() @ self.hams[k] @ psi)
-            for k in range(K)
-        ])
+        # Vectorized: L[k] = Re(phi^H @ H_k @ phi - psi^H @ H_k @ psi)
+        Hphi = np.einsum('kij,j->ki', hams, phi)   # (K, d)
+        Hpsi = np.einsum('kij,j->ki', hams, psi)   # (K, d)
+        L = np.real(np.einsum('d,kd->k', phi.conj(), Hphi)
+                    - np.einsum('d,kd->k', psi.conj(), Hpsi))
 
-        # Q[k,m] = <{H_k, H_m}/2>_phi - <{H_k, H_m}/2>_psi
-        Q = np.zeros((K, K))
-        for k in range(K):
-            for m_idx in range(K):
-                anticomm = (self.hams[k] @ self.hams[m_idx]
-                           + self.hams[m_idx] @ self.hams[k]) / 2
-                Q[k, m_idx] = np.real(
-                    phi.conj() @ anticomm @ phi
-                    - psi.conj() @ anticomm @ psi)
+        # Q[k,m] = Re(<{H_k, H_m}/2>_phi - <{H_k, H_m}/2>_psi)
+        # = Re((Hphi_k^H @ Hphi_m + Hphi_m^H @ Hphi_k)/2 - same for psi)
+        # Since Q is real-symmetric: Q[k,m] = Re(Hphi_k^H @ Hphi_m) - Re(Hpsi_k^H @ Hpsi_m)
+        Q = np.real(Hphi.conj() @ Hphi.T) - np.real(Hpsi.conj() @ Hpsi.T)
 
         L_outer = np.outer(L, L)
         tol = 1e-10

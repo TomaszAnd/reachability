@@ -77,3 +77,7 @@ temp/
 
 # Claude Code instructions (project-specific, not for repo)
 CLAUDE.md
+
+# Internal documentation (not for repo)
+IMPLEMENTATION_NOTES.md
+Reachability_draft*.pdf
