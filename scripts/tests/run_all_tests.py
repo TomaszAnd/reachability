@@ -98,8 +98,8 @@ def test_A_krylov_m_sensitivity():
         for ensemble in ['GUE', 'canonical']:
             for K in [5, d]:
                 hams = make_model_and_hams(d, K, ensemble, seed=42)
-                psi = make_init_state(d)
-                phi = make_random_state(d, seed=100)
+                phi = make_init_state(d)
+                psi = make_random_state(d, seed=100)
 
                 lambdas = np.random.RandomState(42).uniform(-1, 1, K)
 
@@ -107,7 +107,7 @@ def test_A_krylov_m_sensitivity():
                 m_max = min(K, d)
                 scores = []
                 for m in range(1, m_max + 1):
-                    kc = KrylovCriterion(hams, psi, phi, m=m)
+                    kc = KrylovCriterion(hams, phi, psi, m=m)
                     R = kc.evaluate(lambdas)
                     scores.append(R)
 
@@ -130,10 +130,10 @@ def test_A_krylov_m_sensitivity():
     # Check GUE full rank -> R=1
     d = 8
     hams = make_model_and_hams(d, d, 'GUE', seed=42)
-    psi = make_init_state(d)
-    phi = make_random_state(d, seed=100)
+    phi = make_init_state(d)
+    psi = make_random_state(d, seed=100)
     lambdas = np.random.RandomState(42).uniform(-1, 1, d)
-    kc = KrylovCriterion(hams, psi, phi, m=d)
+    kc = KrylovCriterion(hams, phi, psi, m=d)
     R_full = kc.evaluate(lambdas)
 
     if R_full > 0.999:
@@ -155,9 +155,9 @@ def test_B_analytical_limits():
     Test B: Verify criteria match analytical predictions in known limits.
 
     Checks:
-    1. S(lambda) = 1 when phi = exp(-iH(lambda)t)|psi> (time-evolved state)
+    1. S(lambda) = 1 when psi = exp(-iH(lambda)t)|phi> (time-evolved state)
     2. Moment criterion detects unreachability for K=2
-    3. R(lambda) = 1 when phi in K_m(H(lambda), psi) (Krylov member)
+    3. R(lambda) = 1 when psi in K_m(H(lambda), phi) (Krylov member)
     """
     print("\n" + "=" * 60)
     print("TEST B: Analytical Limits")
@@ -168,7 +168,7 @@ def test_B_analytical_limits():
     # Test B1: S(lambda) = 1 for time-evolved target
     d, K = 8, 5
     hams = make_model_and_hams(d, K, 'GUE', seed=42)
-    psi = make_init_state(d)
+    phi = make_init_state(d)
 
     rng = np.random.RandomState(42)
     lambdas = rng.uniform(-1, 1, K)
@@ -176,9 +176,9 @@ def test_B_analytical_limits():
 
     H = sum(l * H_k for l, H_k in zip(lambdas, hams))
     U = expm(-1j * H * t)
-    phi_evolved = U @ psi
+    psi_evolved = U @ phi
 
-    sc = SpectralCriterion(hams, psi, phi_evolved)
+    sc = SpectralCriterion(hams, phi, psi_evolved)
     S_evolved = sc.evaluate(lambdas)
 
     if abs(S_evolved - 1.0) < 1e-6:
@@ -191,14 +191,14 @@ def test_B_analytical_limits():
     # Test B2: Moment detects unreachability with K=2 (low K)
     d = 8
     hams_2 = make_model_and_hams(d, 2, 'GUE', seed=42)
-    psi = make_init_state(d)
+    phi = make_init_state(d)
 
     n_unreachable = 0
     n_trials = get_trials()
     for trial in range(n_trials):
-        phi = make_random_state(d, seed=200 + trial)
+        psi = make_random_state(d, seed=200 + trial)
 
-        mc = MomentCriterion(hams_2, psi, phi)
+        mc = MomentCriterion(hams_2, phi, psi)
         result = mc.is_reachable()
         if result.verdict == Verdict.UNREACHABLE:
             n_unreachable += 1
@@ -214,15 +214,15 @@ def test_B_analytical_limits():
     # Test B3: R(lambda) = 1 for Krylov member
     d, K = 8, 5
     hams = make_model_and_hams(d, K, 'GUE', seed=42)
-    psi = make_init_state(d)
+    phi = make_init_state(d)
     lambdas = rng.uniform(-1, 1, K)
 
     H = sum(l * H_k for l, H_k in zip(lambdas, hams))
-    # phi = H|psi> / ||H|psi>|| is in K_m for m >= 2
-    Hpsi = H @ psi
-    phi_krylov = Hpsi / np.linalg.norm(Hpsi)
+    # psi = H|phi> / ||H|phi>|| is in K_m for m >= 2
+    Hphi = H @ phi
+    psi_krylov = Hphi / np.linalg.norm(Hphi)
 
-    kc = KrylovCriterion(hams, psi, phi_krylov, m=min(K, d))
+    kc = KrylovCriterion(hams, phi, psi_krylov, m=min(K, d))
     R_krylov = kc.evaluate(lambdas)
 
     if abs(R_krylov - 1.0) < 1e-6:
@@ -260,12 +260,12 @@ def test_C_monotonicity_K():
 
         for K in K_values:
             hams = make_model_and_hams(d, K, ensemble, seed=42)
-            psi = make_init_state(d)
+            phi = make_init_state(d)
 
             unreachable = 0
             for trial in range(n_trials):
-                phi = make_random_state(d, seed=300 + trial)
-                sc = SpectralCriterion(hams, psi, phi, tau=tau)
+                psi = make_random_state(d, seed=300 + trial)
+                sc = SpectralCriterion(hams, phi, psi, tau=tau)
                 result = sc.is_reachable(maxiter=50, restarts=1, seed=trial)
                 if result.verdict == Verdict.UNREACHABLE:
                     unreachable += 1
@@ -316,19 +316,19 @@ def test_D_pipeline_consistency():
     seed = 42
 
     for ensemble in ['GUE', 'canonical']:
-        psi = make_init_state(d)
-        phi = make_random_state(d, seed=seed + 1000)
+        phi = make_init_state(d)
+        psi = make_random_state(d, seed=seed + 1000)
         hams = make_model_and_hams(d, K, ensemble, seed=seed)
 
         # Generate again to verify reproducibility
-        phi2 = make_random_state(d, seed=seed + 1000)
+        psi2 = make_random_state(d, seed=seed + 1000)
         hams2 = make_model_and_hams(d, K, ensemble, seed=seed)
 
         # D1: States/Hamiltonians match
-        phi_match = np.allclose(phi, phi2)
+        psi_match = np.allclose(psi, psi2)
         hams_match = all(np.allclose(h1, h2) for h1, h2 in zip(hams, hams2))
 
-        if phi_match and hams_match:
+        if psi_match and hams_match:
             results['passed'] += 1
             print(f"  {ensemble}: State/Hamiltonian generation reproducible PASS")
         else:
@@ -339,13 +339,13 @@ def test_D_pipeline_consistency():
         rng = np.random.RandomState(seed)
         lambdas = rng.uniform(-1, 1, K)
 
-        sc1 = SpectralCriterion(hams, psi, phi)
-        sc2 = SpectralCriterion(hams2, psi, phi2)
+        sc1 = SpectralCriterion(hams, phi, psi)
+        sc2 = SpectralCriterion(hams2, phi, psi2)
         S1 = sc1.evaluate(lambdas)
         S2 = sc2.evaluate(lambdas)
 
-        kc1 = KrylovCriterion(hams, psi, phi, m=min(K, d))
-        kc2 = KrylovCriterion(hams2, psi, phi2, m=min(K, d))
+        kc1 = KrylovCriterion(hams, phi, psi, m=min(K, d))
+        kc2 = KrylovCriterion(hams2, phi, psi2, m=min(K, d))
         R1 = kc1.evaluate(lambdas)
         R2 = kc2.evaluate(lambdas)
 
@@ -389,10 +389,10 @@ def test_E_gradient_edge_cases():
 
     d, K = 8, 3
     hams = make_model_and_hams(d, K, 'GUE', seed=42)
-    psi = make_init_state(d)
-    phi = make_random_state(d, seed=100)
+    phi = make_init_state(d)
+    psi = make_random_state(d, seed=100)
 
-    sc = SpectralCriterion(hams, psi, phi)
+    sc = SpectralCriterion(hams, phi, psi)
 
     # E1: Gradient at lambda = 0
     lambdas_zero = np.zeros(K)
@@ -439,7 +439,7 @@ def test_E_gradient_edge_cases():
 
     # E4: Krylov gradient vs finite differences
     m = min(K, d)
-    kc = KrylovCriterion(hams, psi, phi, m=m)
+    kc = KrylovCriterion(hams, phi, psi, m=m)
     R, grad_R = kc.evaluate(lambdas, return_gradient=True)
 
     grad_R_fd = np.zeros(K)
@@ -498,11 +498,11 @@ def test_F_reproducibility():
         print(f"  F1: Hamiltonian generation NOT reproducible FAIL")
 
     # F2: Optimization reproducibility
-    psi = make_init_state(d)
-    phi = make_random_state(d, seed=100)
+    phi = make_init_state(d)
+    psi = make_random_state(d, seed=100)
 
-    sc1 = SpectralCriterion(hams1, psi, phi, tau=0.99)
-    sc2 = SpectralCriterion(hams2, psi, phi, tau=0.99)
+    sc1 = SpectralCriterion(hams1, phi, psi, tau=0.99)
+    sc2 = SpectralCriterion(hams2, phi, psi, tau=0.99)
     r1 = sc1.is_reachable(maxiter=50, restarts=1, seed=42)
     r2 = sc2.is_reachable(maxiter=50, restarts=1, seed=42)
 
@@ -647,12 +647,12 @@ def test_G_lie_algebra():
         print(f"  G3: [H1,H2] does NOT generate new direction FAIL")
 
     # G4: Agreement with spectral criterion
-    psi = make_init_state(d)
+    phi = make_init_state(d)
     n_reachable = 0
     n_test = get_trials()
     for trial in range(n_test):
-        phi = make_random_state(d, seed=500 + trial)
-        sc = SpectralCriterion(hams[:d*d], psi, phi, tau=0.99)
+        psi = make_random_state(d, seed=500 + trial)
+        sc = SpectralCriterion(hams[:d*d], phi, psi, tau=0.99)
         result = sc.is_reachable(maxiter=100, restarts=2, seed=trial)
         if result.verdict == Verdict.REACHABLE:
             n_reachable += 1

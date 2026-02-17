@@ -1,11 +1,11 @@
 """
 Reachability criteria for quantum control systems.
 
-Three criteria for testing whether target state |phi> is reachable
-from initial state |psi> under H(lambda) = sum_k lambda_k H_k:
+Three criteria for testing whether target state |psi> is reachable
+from initial state |phi> under H(lambda) = sum_k lambda_k H_k:
 
-- SpectralCriterion: Spectral overlap S(lambda) = sum_n |<u_n|phi>* <u_n|psi>|
-- KrylovCriterion: Krylov projection R(lambda) = ||P_K |phi>||^2
+- SpectralCriterion: Spectral overlap S(lambda) = sum_n |<u_n|psi>* <u_n|phi>|
+- KrylovCriterion: Krylov projection R(lambda) = ||P_K |psi>||^2
 - MomentCriterion: Positive definiteness of moment matrix Q + x L L^T
 
 Class hierarchy:
@@ -79,8 +79,8 @@ class ReachabilityCriterion(ABC):
     def __init__(
         self,
         model_or_hams,
-        psi: np.ndarray,
         phi: np.ndarray,
+        psi: np.ndarray,
         tau: float = 0.99,
     ):
         from .models import QuantumModel
@@ -90,8 +90,8 @@ class ReachabilityCriterion(ABC):
         else:
             self.model = None
             self.hams = model_or_hams
-        self.psi = psi.flatten()
         self.phi = phi.flatten()
+        self.psi = psi.flatten()
         self.tau = tau
         self.K = len(self.hams)
         self.dim = self.hams[0].shape[0]
@@ -227,7 +227,7 @@ class SpectralCriterion(OptimizableCriterion):
     """
     Spectral overlap criterion.
 
-    S(lambda) = sum_n |<u_n(lambda)|phi>* <u_n(lambda)|psi>|
+    S(lambda) = sum_n |<u_n(lambda)|psi>* <u_n(lambda)|phi>|
 
     where |u_n(lambda)> are eigenstates of H(lambda).
 
@@ -245,8 +245,8 @@ class SpectralCriterion(OptimizableCriterion):
         Algorithm:
             1. Build H(lambda) = sum_k lambda_k H_k
             2. Eigendecompose: H|u_n> = E_n|u_n>
-            3. Project states: <u_n|psi> and <u_n|phi>
-            4. Overlap coefficients: c_n = <u_n|phi>* <u_n|psi>
+            3. Project states: <u_n|phi> and <u_n|psi>
+            4. Overlap coefficients: c_n = <u_n|psi>* <u_n|phi>
             5. Sum: S = sum_n |c_n|
             6. (If gradient) Perturbation theory for dS/dlambda_k
         """
@@ -262,11 +262,11 @@ class SpectralCriterion(OptimizableCriterion):
             return 0.0
 
         # Step 3: Project states onto eigenbasis
-        psi_coeffs = eigenvectors.conj().T @ self.psi  # <u_n|psi>
         phi_coeffs = eigenvectors.conj().T @ self.phi  # <u_n|phi>
+        psi_coeffs = eigenvectors.conj().T @ self.psi  # <u_n|psi>
 
         # Step 4: Overlap coefficients
-        c = phi_coeffs.conj() * psi_coeffs  # c_n = <u_n|phi>* <u_n|psi>
+        c = psi_coeffs.conj() * phi_coeffs  # c_n = <u_n|psi>* <u_n|phi>
         abs_c = np.abs(c)
 
         # Step 5: Spectral overlap
@@ -290,15 +290,15 @@ class SpectralCriterion(OptimizableCriterion):
         # dS/dlambda_k = sum_n Re[sign(c_n)* dc_n/dlambda_k]
         grad = np.zeros(self.K)
         U = eigenvectors
-        weighted_inv_psi = inv_delta_E * psi_coeffs[None, :]  # (d, d)
         weighted_inv_phi = inv_delta_E * phi_coeffs[None, :]  # (d, d)
+        weighted_inv_psi = inv_delta_E * psi_coeffs[None, :]  # (d, d)
         sign_c_conj = sign_c.conj()
 
         for k in range(self.K):
             Hk_eig = U.conj().T @ self.hams[k] @ U
-            dpsi = np.sum(Hk_eig * weighted_inv_psi, axis=1)
             dphi = np.sum(Hk_eig * weighted_inv_phi, axis=1)
-            dc = dphi.conj() * psi_coeffs + phi_coeffs.conj() * dpsi
+            dpsi = np.sum(Hk_eig * weighted_inv_psi, axis=1)
+            dc = dpsi.conj() * phi_coeffs + psi_coeffs.conj() * dphi
             grad[k] = np.real(np.sum(sign_c_conj * dc))
 
         return S, grad
@@ -312,9 +312,9 @@ class KrylovCriterion(OptimizableCriterion):
     """
     Krylov subspace projection criterion.
 
-    R(lambda) = ||P_Km(H(lambda)) |phi>||^2
+    R(lambda) = ||P_Km(H(lambda)) |psi>||^2
 
-    where P_Km is the projection onto Krylov subspace K_m(H(lambda), psi).
+    where P_Km is the projection onto Krylov subspace K_m(H(lambda), phi).
 
     Args:
         m: Krylov subspace dimension. Default is d (full Hilbert space dimension).
@@ -324,31 +324,31 @@ class KrylovCriterion(OptimizableCriterion):
     def __init__(
         self,
         hams: List[np.ndarray],
-        psi: np.ndarray,
         phi: np.ndarray,
+        psi: np.ndarray,
         tau: float = 0.99,
         m: Optional[int] = None,
     ):
-        super().__init__(hams, psi, phi, tau)
+        super().__init__(hams, phi, psi, tau)
         self.m = m if m is not None else self.dim
 
     # -- Internal: Arnoldi iteration --
 
     def _krylov_basis(self, H: np.ndarray) -> np.ndarray:
         """
-        Build orthonormal Krylov basis K_m(H, psi) via Arnoldi iteration.
+        Build orthonormal Krylov basis K_m(H, phi) via Arnoldi iteration.
 
         Returns (d, m_actual) matrix with orthonormal columns.
         m_actual <= m due to possible Krylov breakdown.
         """
         d = H.shape[0]
         m = min(self.m, d)
-        psi_norm = np.linalg.norm(self.psi)
-        if psi_norm == 0:
+        phi_norm = np.linalg.norm(self.phi)
+        if phi_norm == 0:
             return np.zeros((d, 0), dtype=np.complex128)
 
         result = np.empty((d, m), dtype=np.complex128)
-        result[:, 0] = self.psi / psi_norm
+        result[:, 0] = self.phi / phi_norm
 
         actual_m = m
         for i in range(1, m):
@@ -376,7 +376,7 @@ class KrylovCriterion(OptimizableCriterion):
         Algorithm:
             1. Build H(lambda) = sum_k lambda_k H_k
             2. Arnoldi iteration: build orthonormal Krylov basis V
-            3. Project: c = V^dag |phi>
+            3. Project: c = V^dag |psi>
             4. Score: R = ||c||^2
             5. (If gradient) Differentiate through Arnoldi iteration
         """
@@ -384,7 +384,7 @@ class KrylovCriterion(OptimizableCriterion):
         H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
         V = self._krylov_basis(H)
 
-        coeffs = V.conj().T @ self.phi
+        coeffs = V.conj().T @ self.psi
         R = float(np.real(np.vdot(coeffs, coeffs)))
         R = np.clip(R, 0.0, 1.0)
 
@@ -394,13 +394,13 @@ class KrylovCriterion(OptimizableCriterion):
         # Step 5: Gradient via differentiating Arnoldi iteration
         d = H.shape[0]
         m = min(self.m, d)
-        psi_norm = np.linalg.norm(self.psi)
-        if psi_norm == 0:
+        phi_norm = np.linalg.norm(self.phi)
+        if phi_norm == 0:
             return R, np.zeros(self.K)
 
         V_arn = np.zeros((d, m), dtype=np.complex128)
         dV = np.zeros((self.K, d, m), dtype=np.complex128)
-        V_arn[:, 0] = self.psi / psi_norm
+        V_arn[:, 0] = self.phi / phi_norm
 
         actual_m = m
         for i in range(1, m):
@@ -432,9 +432,9 @@ class KrylovCriterion(OptimizableCriterion):
         V_arn = V_arn[:, :actual_m]
         dV = dV[:, :, :actual_m]
 
-        c = V_arn.conj().T @ self.phi  # (actual_m,)
-        # dc[k] = dV[k]^H @ phi
-        dc_all = np.einsum('kdi,d->ki', dV.conj(), self.phi)  # (K, actual_m)
+        c = V_arn.conj().T @ self.psi  # (actual_m,)
+        # dc[k] = dV[k]^H @ psi
+        dc_all = np.einsum('kdi,d->ki', dV.conj(), self.psi)  # (K, actual_m)
         grad = 2.0 * np.real(np.einsum('i,ki->k', c.conj(), dc_all))
 
         return R, grad
@@ -450,8 +450,8 @@ class MomentCriterion(ReachabilityCriterion):
 
     Tests whether Q + gamma L L^T is positive definite for some gamma,
     where:
-        L[k] = <H_k>_phi - <H_k>_psi
-        Q[k,m] = <{H_k, H_m}>_phi - <{H_k, H_m}>_psi  ({A,B} = AB+BA)
+        L[k] = <H_k>_psi - <H_k>_phi
+        Q[k,m] = <{H_k, H_m}>_psi - <{H_k, H_m}>_phi  ({A,B} = AB+BA)
 
     For large |gamma|, gamma*LL^T dominates except on ker(L), so
     M(gamma) > 0 effectively checks Q's positive definiteness on ker(L).
@@ -465,11 +465,11 @@ class MomentCriterion(ReachabilityCriterion):
     def __init__(
         self,
         hams: List[np.ndarray],
-        psi: np.ndarray,
         phi: np.ndarray,
+        psi: np.ndarray,
         tau: float = 0.99,
     ):
-        super().__init__(hams, psi, phi, tau)
+        super().__init__(hams, phi, psi, tau)
 
     def evaluate(
         self, lambdas: np.ndarray = None, return_gradient: bool = False
@@ -493,21 +493,21 @@ class MomentCriterion(ReachabilityCriterion):
         difference matrix Q, then tests positive definiteness at
         gamma = +-1000 (large values that probe Q's definiteness on ker(L)).
         """
-        psi = self.psi
         phi = self.phi
+        psi = self.psi
         hams = self._hams_array  # (K, d, d)
 
-        # L[k] = <H_k>_phi - <H_k>_psi (first moment difference)
-        # Vectorized: L[k] = Re(phi^H @ H_k @ phi - psi^H @ H_k @ psi)
-        Hphi = np.einsum('kij,j->ki', hams, phi)   # (K, d)
+        # L[k] = <H_k>_psi - <H_k>_phi (first moment difference)
+        # Vectorized: L[k] = Re(psi^H @ H_k @ psi - phi^H @ H_k @ phi)
         Hpsi = np.einsum('kij,j->ki', hams, psi)   # (K, d)
-        L = np.real(np.einsum('d,kd->k', phi.conj(), Hphi)
-                    - np.einsum('d,kd->k', psi.conj(), Hpsi))
+        Hphi = np.einsum('kij,j->ki', hams, phi)   # (K, d)
+        L = np.real(np.einsum('d,kd->k', psi.conj(), Hpsi)
+                    - np.einsum('d,kd->k', phi.conj(), Hphi))
 
-        # Q[k,m] = <{H_k, H_m}>_phi - <{H_k, H_m}>_psi
+        # Q[k,m] = <{H_k, H_m}>_psi - <{H_k, H_m}>_phi
         # where {A,B} = AB + BA (paper Eq. 6, no 1/2 factor)
         # For Hermitian operators: <{H_k,H_m}> = 2*Re(<H_k H_m>)
-        Q = 2 * (np.real(Hphi.conj() @ Hphi.T) - np.real(Hpsi.conj() @ Hpsi.T))
+        Q = 2 * (np.real(Hpsi.conj() @ Hpsi.T) - np.real(Hphi.conj() @ Hphi.T))
 
         L_outer = np.outer(L, L)
         tol = 1e-10

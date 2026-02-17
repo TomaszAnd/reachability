@@ -5,7 +5,7 @@ Confusion Matrix Benchmark: Moment Criterion as Ground Truth.
 Uses the moment criterion to establish ground truth for evaluating
 spectral and Krylov classification performance.
 
-- Reachable targets: constructed via |phi> = exp(-iH(lam)t)|psi>
+- Reachable targets: constructed via |psi> = exp(-iH(lam)t)|phi>
 - Unreachable targets: certified by moment criterion (provable certificate)
 
 Produces:
@@ -113,7 +113,7 @@ def generate_reachable_targets(d, K, ensemble, n_targets=N_REACHABLE, seed=SEED_
 
     for i in range(n_targets):
         trial_seed = seed + i
-        psi = make_init_state(d)
+        phi = make_init_state(d)
         hams = make_model_and_hams(d, K, ensemble, seed=trial_seed)
 
         # Random control parameters and evolution time
@@ -123,10 +123,10 @@ def generate_reachable_targets(d, K, ensemble, n_targets=N_REACHABLE, seed=SEED_
         # Evolve to get target (reachable by construction)
         H = sum(l * Hk for l, Hk in zip(lambda_0, hams))
         U = expm(-1j * H * t)
-        phi = U @ psi
+        psi = U @ phi
 
         results.append({
-            'psi': psi, 'phi': phi, 'hams': hams,
+            'phi': phi, 'psi': psi, 'hams': hams,
             'K': K, 'ground_truth': 'reachable',
         })
 
@@ -143,19 +143,19 @@ def generate_unreachable_targets(d, K_small, ensemble, n_targets=N_UNREACHABLE,
         attempts += 1
         trial_seed = seed + attempts
 
-        psi = make_init_state(d)
+        phi = make_init_state(d)
         hams = make_model_and_hams(d, K_small, ensemble, seed=trial_seed)
 
         # Random target (not constructed via evolution)
-        phi = make_random_state(d, seed=trial_seed + 50000)
+        psi = make_random_state(d, seed=trial_seed + 50000)
 
         # Check moment criterion using the new class
-        mc = MomentCriterion(hams, psi, phi)
+        mc = MomentCriterion(hams, phi, psi)
         result = mc.is_reachable()
 
         if result.verdict == Verdict.UNREACHABLE:
             results.append({
-                'psi': psi, 'phi': phi, 'hams': hams,
+                'phi': phi, 'psi': psi, 'hams': hams,
                 'K': K_small, 'ground_truth': 'unreachable',
             })
 
@@ -173,20 +173,20 @@ def evaluate_targets(targets, tau=TAU, maxiter=MAXITER, restarts=RESTARTS):
     results = []
 
     for i, tgt in enumerate(targets):
-        psi, phi, hams = tgt['psi'], tgt['phi'], tgt['hams']
+        phi, psi, hams = tgt['phi'], tgt['psi'], tgt['hams']
         K = len(hams)
-        d = psi.shape[0]
+        d = phi.shape[0]
         m = min(K, d)
 
         # Spectral
         t0 = time.perf_counter()
-        sc = SpectralCriterion(hams, psi, phi, tau=tau)
+        sc = SpectralCriterion(hams, phi, psi, tau=tau)
         spec_res = sc.is_reachable(maxiter=maxiter, restarts=restarts, seed=42 + i)
         spec_time = time.perf_counter() - t0
 
         # Krylov
         t0 = time.perf_counter()
-        kc = KrylovCriterion(hams, psi, phi, tau=tau, m=m)
+        kc = KrylovCriterion(hams, phi, psi, tau=tau, m=m)
         kryl_res = kc.is_reachable(maxiter=maxiter, restarts=restarts, seed=42 + i)
         kryl_time = time.perf_counter() - t0
 
@@ -348,7 +348,7 @@ def plot_accuracy_vs_time(all_results, output_path):
 
 def run_iterations_sweep(d, K, ensemble, maxiters, n_trials=20, seed=77777):
     """Run spectral and krylov for varying maxiter values."""
-    psi = make_init_state(d)
+    phi = make_init_state(d)
     hams = make_model_and_hams(d, K, ensemble, seed=seed)
 
     m = min(K, d)
@@ -361,19 +361,19 @@ def run_iterations_sweep(d, K, ensemble, maxiters, n_trials=20, seed=77777):
         t = rng.uniform(0.5, 5.0)
         H = sum(l * Hk for l, Hk in zip(lam0, hams))
         U = expm(-1j * H * t)
-        phi = U @ psi
-        targets.append(phi)
+        psi = U @ phi
+        targets.append(psi)
 
     results = {'spectral': {}, 'krylov': {}}
     for mi in maxiters:
         spec_scores = []
         kryl_scores = []
-        for i, phi in enumerate(targets):
-            sc = SpectralCriterion(hams, psi, phi)
+        for i, psi in enumerate(targets):
+            sc = SpectralCriterion(hams, phi, psi)
             sr = sc.is_reachable(maxiter=mi, restarts=1, seed=42 + i)
             spec_scores.append(sr.score)
 
-            kc = KrylovCriterion(hams, psi, phi, m=m)
+            kc = KrylovCriterion(hams, phi, psi, m=m)
             kr = kc.is_reachable(maxiter=mi, restarts=1, seed=42 + i)
             kryl_scores.append(kr.score)
 

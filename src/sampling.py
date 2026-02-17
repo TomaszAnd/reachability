@@ -95,7 +95,7 @@ class DensitySweep:
 
         cfg = self.config
         d = self.model.dim
-        psi = self.model.init_state()
+        phi = self.model.init_state()
         consecutive_zeros = 0
 
         for K in K_values:
@@ -120,19 +120,19 @@ class DensitySweep:
                 sub_model = self.model.sample_submodel(K, seed=sub_seed)
 
                 for t_idx in range(cfg.n_targets):
-                    phi = sub_model.random_state()
+                    psi = sub_model.random_state()
                     # Krylov subspace dimension: full d by default (m<d gives trivially low scores)
                     m = cfg.krylov_m if cfg.krylov_m is not None else d
 
                     if 'moment' in criteria:
-                        mc = MomentCriterion(sub_model, psi, phi, tau=cfg.tau)
+                        mc = MomentCriterion(sub_model, phi, psi, tau=cfg.tau)
                         result = mc.is_reachable()
                         if result.verdict == Verdict.UNREACHABLE:
                             counts['moment'] += 1
                         raw_scores['moment'].append(result.score)
 
                     if 'spectral' in criteria:
-                        sc = SpectralCriterion(sub_model, psi, phi, tau=cfg.tau)
+                        sc = SpectralCriterion(sub_model, phi, psi, tau=cfg.tau)
                         result = sc.is_reachable(
                             maxiter=cfg.maxiter, restarts=cfg.restarts,
                             method=cfg.method)
@@ -141,7 +141,7 @@ class DensitySweep:
                         raw_scores['spectral'].append(result.score)
 
                     if 'krylov' in criteria:
-                        kc = KrylovCriterion(sub_model, psi, phi, tau=cfg.tau, m=m)
+                        kc = KrylovCriterion(sub_model, phi, psi, tau=cfg.tau, m=m)
                         result = kc.is_reachable(
                             maxiter=cfg.maxiter, restarts=cfg.restarts,
                             method=cfg.method)
