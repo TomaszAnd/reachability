@@ -315,6 +315,7 @@ class KrylovCriterion(OptimizableCriterion):
     R(lambda) = ||P_Km(H(lambda)) |psi>||^2
 
     where P_Km is the projection onto Krylov subspace K_m(H(lambda), phi).
+    Uses Lanczos iteration (3-term recurrence, Hermitian-optimal).
 
     Args:
         m: Krylov subspace dimension. Default is d (full Hilbert space dimension).
@@ -373,37 +374,6 @@ class KrylovCriterion(OptimizableCriterion):
 
         V = V[:, :actual_m]
         Q, _ = np.linalg.qr(V, mode="reduced")
-        return Q
-
-    def _krylov_basis(self, H: np.ndarray) -> np.ndarray:
-        """
-        Build orthonormal Krylov basis via Arnoldi iteration.
-
-        Deprecated: Use _lanczos_basis for Hermitian H (faster, equivalent).
-        Kept for reference and potential non-Hermitian extensions.
-        """
-        d = H.shape[0]
-        m = min(self.m, d)
-        phi_norm = np.linalg.norm(self.phi)
-        if phi_norm == 0:
-            return np.zeros((d, 0), dtype=np.complex128)
-
-        result = np.empty((d, m), dtype=np.complex128)
-        result[:, 0] = self.phi / phi_norm
-
-        actual_m = m
-        for i in range(1, m):
-            w = H @ result[:, i - 1]
-            h = result[:, :i].conj().T @ w
-            w = w - result[:, :i] @ h
-            norm_w = np.linalg.norm(w)
-            if norm_w < KRYLOV_BREAKDOWN_TOL:
-                actual_m = i
-                break
-            result[:, i] = w / norm_w
-
-        result = result[:, :actual_m]
-        Q, _ = np.linalg.qr(result, mode="reduced")
         return Q
 
     # -- Public interface --

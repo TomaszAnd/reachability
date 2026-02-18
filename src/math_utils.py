@@ -10,7 +10,7 @@ from typing import List, Tuple
 
 import numpy as np
 
-# Breakdown tolerance for Arnoldi iteration
+# Breakdown tolerance for Lanczos/Krylov iteration
 KRYLOV_BREAKDOWN_TOL: float = 1e-14
 
 
