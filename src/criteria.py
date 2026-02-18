@@ -412,11 +412,11 @@ class KrylovCriterion(OptimizableCriterion):
             V_block = V_arn[:, :i]  # (d, i)
             h = V_block.conj().T @ w  # (i,)
             # dh[k] = V_block^H @ dw[k] + dV[k,:,:i]^H @ w
-            dh = dw @ V_block.conj() + np.einsum('kdi,d->ki', dV[:, :, :i].conj(), w)
+            dh = dw @ V_block.conj() + (dV[:, :, :i].conj().transpose(0, 2, 1) @ w)
 
             w_tilde = w - V_block @ h  # (d,)
             # dw_tilde[k] = dw[k] - V_block @ dh[k] - dV[k,:,:i] @ h
-            dw_tilde = dw - dh @ V_block.T - np.einsum('kdi,i->kd', dV[:, :, :i], h)
+            dw_tilde = dw - dh @ V_block.T - (dV[:, :, :i] @ h)
 
             norm_w = np.linalg.norm(w_tilde)
             if norm_w < KRYLOV_BREAKDOWN_TOL:
@@ -434,7 +434,7 @@ class KrylovCriterion(OptimizableCriterion):
 
         c = V_arn.conj().T @ self.psi  # (actual_m,)
         # dc[k] = dV[k]^H @ psi
-        dc_all = np.einsum('kdi,d->ki', dV.conj(), self.psi)  # (K, actual_m)
+        dc_all = (dV.conj().transpose(0, 2, 1) @ self.psi)  # (K, actual_m)
         grad = 2.0 * np.real(np.einsum('i,ki->k', c.conj(), dc_all))
 
         return R, grad

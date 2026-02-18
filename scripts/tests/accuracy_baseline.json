@@ -20,7 +20,7 @@
     "moment_verdict": "inconclusive",
     "spectral_score": 0.6799300488090485,
     "spectral_verdict": "unreachable",
-    "krylov_score": 0.4519805528553459,
+    "krylov_score": 0.4048829139607113,
     "krylov_verdict": "unreachable"
   },
   "canonical_d16_K30": {
