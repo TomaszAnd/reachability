@@ -95,7 +95,7 @@ class ReachabilityCriterion(ABC):
         self.tau = tau
         self.K = len(self.hams)
         self.dim = self.hams[0].shape[0]
-        self._hams_array = np.stack(self.hams)  # (K, d, d) for fast einsum
+        self._hams_array = np.stack(self.hams)  # (K, d, d) for vectorized ops
 
     @abstractmethod
     def evaluate(
@@ -332,14 +332,55 @@ class KrylovCriterion(OptimizableCriterion):
         super().__init__(hams, phi, psi, tau)
         self.m = m if m is not None else self.dim
 
-    # -- Internal: Arnoldi iteration --
+    # -- Internal: Lanczos iteration --
 
-    def _krylov_basis(self, H: np.ndarray) -> np.ndarray:
+    def _lanczos_basis(self, H: np.ndarray) -> np.ndarray:
         """
-        Build orthonormal Krylov basis K_m(H, phi) via Arnoldi iteration.
+        Build orthonormal Krylov basis K_m(H, phi) via Lanczos iteration.
+
+        For Hermitian H, Lanczos uses a 3-term recurrence instead of full
+        Gram-Schmidt orthogonalization (Arnoldi). This gives equivalent results
+        with O(d) work per step instead of O(d*j).
 
         Returns (d, m_actual) matrix with orthonormal columns.
         m_actual <= m due to possible Krylov breakdown.
+        Final QR ensures orthogonality despite finite-precision arithmetic.
+        """
+        d = self.dim
+        m = min(self.m, d)
+        phi_norm = np.linalg.norm(self.phi)
+        if phi_norm == 0:
+            return np.zeros((d, 0), dtype=np.complex128)
+
+        V = np.zeros((d, m), dtype=np.complex128)
+        V[:, 0] = self.phi / phi_norm
+
+        beta_prev = 0.0
+        actual_m = m
+
+        for j in range(m - 1):
+            w = H @ V[:, j]
+            alpha = np.real(np.vdot(V[:, j], w))
+            w -= alpha * V[:, j]
+            if j > 0:
+                w -= beta_prev * V[:, j - 1]
+            beta = np.linalg.norm(w)
+            if beta < KRYLOV_BREAKDOWN_TOL:
+                actual_m = j + 1
+                break
+            V[:, j + 1] = w / beta
+            beta_prev = beta
+
+        V = V[:, :actual_m]
+        Q, _ = np.linalg.qr(V, mode="reduced")
+        return Q
+
+    def _krylov_basis(self, H: np.ndarray) -> np.ndarray:
+        """
+        Build orthonormal Krylov basis via Arnoldi iteration.
+
+        Deprecated: Use _lanczos_basis for Hermitian H (faster, equivalent).
+        Kept for reference and potential non-Hermitian extensions.
         """
         d = H.shape[0]
         m = min(self.m, d)
@@ -375,66 +416,98 @@ class KrylovCriterion(OptimizableCriterion):
 
         Algorithm:
             1. Build H(lambda) = sum_k lambda_k H_k
-            2. Arnoldi iteration: build orthonormal Krylov basis V
+            2. Lanczos iteration: build orthonormal Krylov basis V
             3. Project: c = V^dag |psi>
             4. Score: R = ||c||^2
-            5. (If gradient) Differentiate through Arnoldi iteration
+            5. (If gradient) Differentiate through Lanczos 3-term recurrence
         """
-        # Steps 1-4: Score computation
+        # Steps 1-4: Score computation via Lanczos
         H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
-        V = self._krylov_basis(H)
-
-        coeffs = V.conj().T @ self.psi
-        R = float(np.real(np.vdot(coeffs, coeffs)))
-        R = np.clip(R, 0.0, 1.0)
 
         if not return_gradient:
-            return R
+            V = self._lanczos_basis(H)
+            coeffs = V.conj().T @ self.psi
+            R = float(np.real(np.vdot(coeffs, coeffs)))
+            return np.clip(R, 0.0, 1.0)
 
-        # Step 5: Gradient via differentiating Arnoldi iteration
+        # Step 5: Lanczos iteration with gradient differentiation
+        #
+        # Lanczos 3-term recurrence for Hermitian H:
+        #   w = H v_j - alpha_j v_j - beta_{j-1} v_{j-1}
+        # where alpha_j = Re(v_j† H v_j), beta_j = ||w||.
+        #
+        # Differentiating w.r.t. lambda_k (denoting d/dlambda_k as d prefix):
+        #   dw_k  = H_k v_j + H dv_j_k
+        #   dalpha_k = Re(dv_j_k† w + v_j† dw_k)
+        #   dwtilde_k = dw_k - dalpha_k v_j - alpha_j dv_j_k
+        #                     - dbeta_{j-1}_k v_{j-1} - beta_{j-1} dv_{j-1}_k
+        #   dbeta_k = Re(wtilde† dwtilde_k) / beta_j
+        #   dv_{j+1}_k = (dwtilde_k - dbeta_k v_{j+1}) / beta_j
+        #
+        # Each step is O(K*d) instead of Arnoldi's O(K*d*j), giving
+        # O(K*d*m) total gradient cost vs Arnoldi's O(K*d*m^2).
+
         d = H.shape[0]
         m = min(self.m, d)
         phi_norm = np.linalg.norm(self.phi)
         if phi_norm == 0:
-            return R, np.zeros(self.K)
+            V = self._lanczos_basis(H)
+            coeffs = V.conj().T @ self.psi
+            R = float(np.real(np.vdot(coeffs, coeffs)))
+            return np.clip(R, 0.0, 1.0), np.zeros(self.K)
 
-        V_arn = np.zeros((d, m), dtype=np.complex128)
+        V = np.zeros((d, m), dtype=np.complex128)
         dV = np.zeros((self.K, d, m), dtype=np.complex128)
-        V_arn[:, 0] = self.phi / phi_norm
+        V[:, 0] = self.phi / phi_norm
+        # dV[:, :, 0] = 0 (phi is constant w.r.t. lambda)
 
+        beta_prev = 0.0
+        dbeta_prev = np.zeros(self.K)
         actual_m = m
-        for i in range(1, m):
-            v_prev = V_arn[:, i - 1]
-            w = H @ v_prev
-            # dw[k] = H_k @ v_prev + H @ dV[k, :, i-1]  (vectorized over k)
-            dw = self._hams_array @ v_prev + (H @ dV[:, :, i - 1].T).T
 
-            V_block = V_arn[:, :i]  # (d, i)
-            h = V_block.conj().T @ w  # (i,)
-            # dh[k] = V_block^H @ dw[k] + dV[k,:,:i]^H @ w
-            dh = dw @ V_block.conj() + (dV[:, :, :i].conj().transpose(0, 2, 1) @ w)
+        for j in range(m - 1):
+            v_j = V[:, j]
+            w = H @ v_j
+            # dw[k] = H_k @ v_j + H @ dV[k, :, j]
+            dw = self._hams_array @ v_j + (H @ dV[:, :, j].T).T
 
-            w_tilde = w - V_block @ h  # (d,)
-            # dw_tilde[k] = dw[k] - V_block @ dh[k] - dV[k,:,:i] @ h
-            dw_tilde = dw - dh @ V_block.T - (dV[:, :, :i] @ h)
+            # Lanczos coefficients and their derivatives
+            alpha = np.real(np.vdot(v_j, w))
+            dalpha = np.real(dV[:, :, j].conj() @ w + dw @ v_j.conj())  # (K,)
 
-            norm_w = np.linalg.norm(w_tilde)
-            if norm_w < KRYLOV_BREAKDOWN_TOL:
-                actual_m = i
+            # 3-term recurrence
+            w_tilde = w - alpha * v_j
+            dw_tilde = dw - dalpha[:, None] * v_j - alpha * dV[:, :, j]
+            if j > 0:
+                v_prev = V[:, j - 1]
+                w_tilde -= beta_prev * v_prev
+                dw_tilde -= (dbeta_prev[:, None] * v_prev
+                             + beta_prev * dV[:, :, j - 1])
+
+            beta = np.linalg.norm(w_tilde)
+            if beta < KRYLOV_BREAKDOWN_TOL:
+                actual_m = j + 1
                 break
 
-            V_arn[:, i] = w_tilde / norm_w
-            v_i = V_arn[:, i]
-            # proj[k] = Re(v_i^H @ dw_tilde[k])
-            proj = np.real(dw_tilde @ v_i.conj())  # (K,)
-            dV[:, :, i] = (dw_tilde - proj[:, None] * v_i[None, :]) / norm_w
+            # Derivative of beta = ||w_tilde||
+            dbeta = np.real(dw_tilde @ w_tilde.conj()) / beta  # (K,)
 
-        V_arn = V_arn[:, :actual_m]
+            V[:, j + 1] = w_tilde / beta
+            dV[:, :, j + 1] = (dw_tilde - dbeta[:, None] * V[:, j + 1]) / beta
+
+            beta_prev = beta
+            dbeta_prev = dbeta
+
+        V = V[:, :actual_m]
         dV = dV[:, :, :actual_m]
 
-        c = V_arn.conj().T @ self.psi  # (actual_m,)
-        # dc[k] = dV[k]^H @ psi
-        dc_all = (dV.conj().transpose(0, 2, 1) @ self.psi)  # (K, actual_m)
+        # Score: R = ||V† psi||^2
+        c = V.conj().T @ self.psi  # (actual_m,)
+        R = float(np.real(np.vdot(c, c)))
+        R = np.clip(R, 0.0, 1.0)
+
+        # Gradient: dR/dlambda_k = 2 Re(c† dc_k)
+        dc_all = dV.conj().transpose(0, 2, 1) @ self.psi  # (K, actual_m)
         grad = 2.0 * np.real(np.einsum('i,ki->k', c.conj(), dc_all))
 
         return R, grad

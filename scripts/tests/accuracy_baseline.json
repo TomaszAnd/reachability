@@ -4,7 +4,7 @@
     "moment_verdict": "inconclusive",
     "spectral_score": 0.6996680572081624,
     "spectral_verdict": "unreachable",
-    "krylov_score": 0.4914548663781854,
+    "krylov_score": 0.4914548663781855,
     "krylov_verdict": "unreachable"
   },
   "canonical_d8_K15": {
@@ -12,23 +12,23 @@
     "moment_verdict": "inconclusive",
     "spectral_score": 0.9686642902365808,
     "spectral_verdict": "unreachable",
-    "krylov_score": 0.9383105071803999,
-    "krylov_verdict": "unreachable"
+    "krylov_score": 1.0,
+    "krylov_verdict": "reachable"
   },
   "canonical_d16_K10": {
     "moment_score": 0.0,
     "moment_verdict": "inconclusive",
     "spectral_score": 0.6799300488090485,
     "spectral_verdict": "unreachable",
-    "krylov_score": 0.4048829139607113,
-    "krylov_verdict": "unreachable"
+    "krylov_score": 1.0,
+    "krylov_verdict": "reachable"
   },
   "canonical_d16_K30": {
     "moment_score": 0.0,
     "moment_verdict": "inconclusive",
     "spectral_score": 0.9999998357817536,
     "spectral_verdict": "reachable",
-    "krylov_score": 1.0,
+    "krylov_score": 0.9999999999999138,
     "krylov_verdict": "reachable"
   },
   "qubitgrid_d8_K5": {
@@ -36,7 +36,7 @@
     "moment_verdict": "inconclusive",
     "spectral_score": 0.9642276443453377,
     "spectral_verdict": "unreachable",
-    "krylov_score": 1.0,
+    "krylov_score": 0.9999999999999996,
     "krylov_verdict": "reachable"
   },
   "qubitgrid_d8_K15": {
@@ -44,7 +44,7 @@
     "moment_verdict": "inconclusive",
     "spectral_score": 0.99999999977223,
     "spectral_verdict": "reachable",
-    "krylov_score": 0.9999999999999999,
+    "krylov_score": 1.0,
     "krylov_verdict": "reachable"
   }
 }
