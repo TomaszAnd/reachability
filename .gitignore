@@ -83,3 +83,7 @@ IMPLEMENTATION_NOTES.md
 QUBITGRID_ANALYSIS.md
 PERFORMANCE_ANALYSIS.md
 Reachability_draft*.pdf
+
+# Benchmark output directories
+benchmark_before*/
+benchmark_after*/
