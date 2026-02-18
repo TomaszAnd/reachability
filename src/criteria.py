@@ -33,7 +33,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from .math_utils import (
-    OVERLAP_TOLERANCE, KRYLOV_BREAKDOWN_TOL,
+    KRYLOV_BREAKDOWN_TOL,
     eigendecompose, clip_to_bounds,
 )
 

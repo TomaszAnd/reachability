@@ -6,18 +6,9 @@ Functions extracted from mathematics.py that are used across multiple modules.
 
 from __future__ import annotations
 
-import logging
 from typing import List, Tuple
 
 import numpy as np
-
-logger = logging.getLogger(__name__)
-
-# Tolerance for spectral overlap bounds checking
-OVERLAP_TOLERANCE: float = 1e-6
-
-# Minimum condition number for eigendecomposition stability
-MIN_CONDITION_NUMBER: float = 1e-12
 
 # Breakdown tolerance for Arnoldi iteration
 KRYLOV_BREAKDOWN_TOL: float = 1e-14
@@ -89,15 +80,3 @@ def clip_to_bounds(x: np.ndarray, bounds: List[Tuple[float, float]]) -> np.ndarr
     return np.clip(x, lower, upper)
 
 
-def construct_hamiltonian(lambdas: np.ndarray, hams: List[np.ndarray]) -> np.ndarray:
-    """
-    Build H(lambda) = sum_k lambda_k H_k.
-
-    Args:
-        lambdas: Parameter vector (K,)
-        hams: List of K Hamiltonian matrices (d x d numpy arrays)
-
-    Returns:
-        Combined Hamiltonian matrix (d x d)
-    """
-    return sum(l * H for l, H in zip(lambdas, hams))

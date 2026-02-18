@@ -9,9 +9,9 @@ K is the primary parameter. Density rho = K/d^2 is computed for output only.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -19,7 +19,7 @@ import pandas as pd
 from .models import QuantumModel
 from .criteria import (
     SpectralCriterion, KrylovCriterion, MomentCriterion,
-    Verdict, ReachabilityResult,
+    Verdict,
 )
 from .math_utils import compute_binomial_sem
 
@@ -69,6 +69,83 @@ class DensitySweep:
         self.config = config or SweepConfig()
         self._results: List[Dict] = []
 
+    def _evaluate_submodel(
+        self,
+        sub_seed: int,
+        K: int,
+        phi: np.ndarray,
+        criteria: List[str],
+    ) -> Tuple[Dict[str, int], Dict[str, list]]:
+        """Evaluate all target states for one submodel.
+
+        Returns (counts, scores) where counts[c] is the number of UNREACHABLE
+        verdicts and scores[c] is a list of raw scores, for each criterion c.
+        """
+        cfg = self.config
+        d = self.model.dim
+        sub_model = self.model.sample_submodel(K, seed=sub_seed)
+        m = cfg.krylov_m if cfg.krylov_m is not None else d
+
+        counts = {c: 0 for c in criteria}
+        scores = {c: [] for c in criteria}
+
+        for _ in range(cfg.n_targets):
+            psi = sub_model.random_state()
+
+            if 'moment' in criteria:
+                mc = MomentCriterion(sub_model, phi, psi, tau=cfg.tau)
+                result = mc.is_reachable()
+                if result.verdict == Verdict.UNREACHABLE:
+                    counts['moment'] += 1
+                scores['moment'].append(result.score)
+
+            if 'spectral' in criteria:
+                sc = SpectralCriterion(sub_model, phi, psi, tau=cfg.tau)
+                result = sc.is_reachable(
+                    maxiter=cfg.maxiter, restarts=cfg.restarts,
+                    method=cfg.method)
+                if result.verdict == Verdict.UNREACHABLE:
+                    counts['spectral'] += 1
+                scores['spectral'].append(result.score)
+
+            if 'krylov' in criteria:
+                kc = KrylovCriterion(sub_model, phi, psi, tau=cfg.tau, m=m)
+                result = kc.is_reachable(
+                    maxiter=cfg.maxiter, restarts=cfg.restarts,
+                    method=cfg.method)
+                if result.verdict == Verdict.UNREACHABLE:
+                    counts['krylov'] += 1
+                scores['krylov'].append(result.score)
+
+        return counts, scores
+
+    def _build_row(
+        self,
+        K: int,
+        criteria: List[str],
+        counts: Dict[str, int],
+        raw_scores: Dict[str, list],
+        n_trials: int,
+    ) -> Dict:
+        """Build a results row for one K value."""
+        cfg = self.config
+        d = self.model.dim
+        row = {
+            'K': K,
+            'd': d,
+            'rho': K / d**2,
+            'tau': cfg.tau,
+            'n_trials': n_trials,
+        }
+        for c in criteria:
+            P = counts[c] / n_trials if n_trials > 0 else 0.0
+            row[f'{c}_P'] = P
+            row[f'{c}_sem'] = compute_binomial_sem(P, n_trials)
+            if cfg.save_raw_scores:
+                row[f'{c}_mean'] = np.mean(raw_scores[c]) if raw_scores[c] else 0.0
+                row[f'{c}_std'] = np.std(raw_scores[c]) if raw_scores[c] else 0.0
+        return row
+
     def run(
         self,
         K_values: List[int],
@@ -112,65 +189,21 @@ class DensitySweep:
             counts = {c: 0 for c in criteria}
             raw_scores = {c: [] for c in criteria}
 
-            # Spawn child RNGs for this K
             child_seeds = self.model._seed_seq.spawn(cfg.n_hamiltonians)
 
             for h_idx in range(cfg.n_hamiltonians):
                 sub_seed = int(child_seeds[h_idx].generate_state(1)[0])
-                sub_model = self.model.sample_submodel(K, seed=sub_seed)
+                local_counts, local_scores = self._evaluate_submodel(
+                    sub_seed, K, phi, criteria)
+                for c in criteria:
+                    counts[c] += local_counts[c]
+                    raw_scores[c].extend(local_scores[c])
 
-                for t_idx in range(cfg.n_targets):
-                    psi = sub_model.random_state()
-                    # Krylov subspace dimension: full d by default (m<d gives trivially low scores)
-                    m = cfg.krylov_m if cfg.krylov_m is not None else d
-
-                    if 'moment' in criteria:
-                        mc = MomentCriterion(sub_model, phi, psi, tau=cfg.tau)
-                        result = mc.is_reachable()
-                        if result.verdict == Verdict.UNREACHABLE:
-                            counts['moment'] += 1
-                        raw_scores['moment'].append(result.score)
-
-                    if 'spectral' in criteria:
-                        sc = SpectralCriterion(sub_model, phi, psi, tau=cfg.tau)
-                        result = sc.is_reachable(
-                            maxiter=cfg.maxiter, restarts=cfg.restarts,
-                            method=cfg.method)
-                        if result.verdict == Verdict.UNREACHABLE:
-                            counts['spectral'] += 1
-                        raw_scores['spectral'].append(result.score)
-
-                    if 'krylov' in criteria:
-                        kc = KrylovCriterion(sub_model, phi, psi, tau=cfg.tau, m=m)
-                        result = kc.is_reachable(
-                            maxiter=cfg.maxiter, restarts=cfg.restarts,
-                            method=cfg.method)
-                        if result.verdict == Verdict.UNREACHABLE:
-                            counts['krylov'] += 1
-                        raw_scores['krylov'].append(result.score)
-
-            row = {
-                'K': K,
-                'd': d,
-                'rho': K / d**2,
-                'tau': cfg.tau,
-                'n_trials': n_trials,
-            }
-
-            for c in criteria:
-                P = counts[c] / n_trials if n_trials > 0 else 0.0
-                row[f'{c}_P'] = P
-                row[f'{c}_sem'] = compute_binomial_sem(P, n_trials)
-                if cfg.save_raw_scores:
-                    row[f'{c}_mean'] = np.mean(raw_scores[c]) if raw_scores[c] else 0.0
-                    row[f'{c}_std'] = np.std(raw_scores[c]) if raw_scores[c] else 0.0
-
+            row = self._build_row(K, criteria, counts, raw_scores, n_trials)
             self._results.append(row)
 
             if verbose:
-                parts = []
-                for c in criteria:
-                    parts.append(f"{c}={row[f'{c}_P']:.2f}")
+                parts = [f"{c}={row[f'{c}_P']:.2f}" for c in criteria]
                 print(", ".join(parts))
 
             # Early stopping: all criteria at P=0 for N consecutive K values
@@ -226,44 +259,6 @@ class DensitySweep:
         phi = self.model.init_state()
         consecutive_zeros = 0
 
-        def _evaluate_submodel(sub_seed, K, phi, criteria, cfg, d):
-            """Evaluate all targets for one submodel. Runs in worker process."""
-            sub_model = self.model.sample_submodel(K, seed=sub_seed)
-            m = cfg.krylov_m if cfg.krylov_m is not None else d
-
-            local_counts = {c: 0 for c in criteria}
-            local_scores = {c: [] for c in criteria}
-
-            for t_idx in range(cfg.n_targets):
-                psi = sub_model.random_state()
-
-                if 'moment' in criteria:
-                    mc = MomentCriterion(sub_model, phi, psi, tau=cfg.tau)
-                    result = mc.is_reachable()
-                    if result.verdict == Verdict.UNREACHABLE:
-                        local_counts['moment'] += 1
-                    local_scores['moment'].append(result.score)
-
-                if 'spectral' in criteria:
-                    sc = SpectralCriterion(sub_model, phi, psi, tau=cfg.tau)
-                    result = sc.is_reachable(
-                        maxiter=cfg.maxiter, restarts=cfg.restarts,
-                        method=cfg.method)
-                    if result.verdict == Verdict.UNREACHABLE:
-                        local_counts['spectral'] += 1
-                    local_scores['spectral'].append(result.score)
-
-                if 'krylov' in criteria:
-                    kc = KrylovCriterion(sub_model, phi, psi, tau=cfg.tau, m=m)
-                    result = kc.is_reachable(
-                        maxiter=cfg.maxiter, restarts=cfg.restarts,
-                        method=cfg.method)
-                    if result.verdict == Verdict.UNREACHABLE:
-                        local_counts['krylov'] += 1
-                    local_scores['krylov'].append(result.score)
-
-            return local_counts, local_scores
-
         for K in K_values:
             if K > self.model.K:
                 if verbose:
@@ -276,17 +271,15 @@ class DensitySweep:
 
             n_trials = cfg.n_hamiltonians * cfg.n_targets
 
-            # Spawn child RNGs for this K
             child_seeds = self.model._seed_seq.spawn(cfg.n_hamiltonians)
             sub_seeds = [int(cs.generate_state(1)[0]) for cs in child_seeds]
 
-            # Parallel over submodels
             results_list = Parallel(n_jobs=n_jobs, prefer="threads")(
-                delayed(_evaluate_submodel)(seed, K, phi, criteria, cfg, d)
+                delayed(self._evaluate_submodel)(seed, K, phi, criteria)
                 for seed in sub_seeds
             )
 
-            # Aggregate results
+            # Aggregate
             counts = {c: 0 for c in criteria}
             raw_scores = {c: [] for c in criteria}
             for local_counts, local_scores in results_list:
@@ -294,31 +287,13 @@ class DensitySweep:
                     counts[c] += local_counts[c]
                     raw_scores[c].extend(local_scores[c])
 
-            row = {
-                'K': K,
-                'd': d,
-                'rho': K / d**2,
-                'tau': cfg.tau,
-                'n_trials': n_trials,
-            }
-
-            for c in criteria:
-                P = counts[c] / n_trials if n_trials > 0 else 0.0
-                row[f'{c}_P'] = P
-                row[f'{c}_sem'] = compute_binomial_sem(P, n_trials)
-                if cfg.save_raw_scores:
-                    row[f'{c}_mean'] = np.mean(raw_scores[c]) if raw_scores[c] else 0.0
-                    row[f'{c}_std'] = np.std(raw_scores[c]) if raw_scores[c] else 0.0
-
+            row = self._build_row(K, criteria, counts, raw_scores, n_trials)
             self._results.append(row)
 
             if verbose:
-                parts = []
-                for c in criteria:
-                    parts.append(f"{c}={row[f'{c}_P']:.2f}")
+                parts = [f"{c}={row[f'{c}_P']:.2f}" for c in criteria]
                 print(", ".join(parts))
 
-            # Early stopping
             if early_stop_zeros > 0:
                 all_zero = all(row[f'{c}_P'] == 0 for c in criteria)
                 if all_zero:
