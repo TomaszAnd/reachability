@@ -95,7 +95,18 @@ class ReachabilityCriterion(ABC):
         self.tau = tau
         self.K = len(self.hams)
         self.dim = self.hams[0].shape[0]
-        self._hams_array = np.stack(self.hams)  # (K, d, d) for vectorized ops
+        self._hams_array_cache = None  # Lazy; built on first access
+
+    @property
+    def _hams_array(self) -> np.ndarray:
+        """Lazily-constructed stacked Hamiltonians array (K, d, d)."""
+        if self._hams_array_cache is None:
+            self._hams_array_cache = np.stack(self.hams)
+        return self._hams_array_cache
+
+    def clear_cache(self) -> None:
+        """Clear cached arrays to free memory."""
+        self._hams_array_cache = None
 
     @abstractmethod
     def evaluate(
