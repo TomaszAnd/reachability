@@ -10,7 +10,6 @@ import logging
 from typing import List, Tuple
 
 import numpy as np
-from scipy.linalg import eigh
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ def eigendecompose(H: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Eigendecomposition of a Hermitian matrix H = U diag(E) U†.
 
-    Uses scipy.linalg.eigh (specialized for Hermitian matrices).
+    Uses numpy.linalg.eigh (benchmarked faster than scipy for d <= 128).
 
     Args:
         H: Hermitian matrix (d x d numpy array)
@@ -40,7 +39,7 @@ def eigendecompose(H: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         RuntimeError: If eigendecomposition fails or produces non-finite results
     """
     try:
-        eigenvalues, eigenvectors = eigh(H)
+        eigenvalues, eigenvectors = np.linalg.eigh(H)
 
         if np.any(~np.isfinite(eigenvalues)) or np.any(~np.isfinite(eigenvectors)):
             raise RuntimeError("Eigendecomposition produced non-finite results")

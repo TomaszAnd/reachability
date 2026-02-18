@@ -62,7 +62,7 @@ DEFAULT_BOUNDS = [(-1.0, 1.0)]
 DEFAULT_METHOD = "L-BFGS-B"
 DEFAULT_RESTARTS = 2
 DEFAULT_MAXITER = 200
-DEFAULT_FTOL = 1e-8
+DEFAULT_FTOL = 1e-6
 
 
 # ============================================================================
