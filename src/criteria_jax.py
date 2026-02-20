@@ -47,7 +47,8 @@ if JAX_AVAILABLE:
         phi_coeffs = eigenvectors.conj().T @ phi
         psi_coeffs = eigenvectors.conj().T @ psi
         c = psi_coeffs.conj() * phi_coeffs
-        S = jnp.sum(jnp.abs(c))
+        # Smooth abs: sqrt(|c|^2 + eps) avoids NaN gradient when c=0
+        S = jnp.sum(jnp.sqrt(jnp.real(c * jnp.conj(c)) + 1e-30))
         return jnp.clip(S, 0.0, 1.0)
 
     _spectral_grad_jax = jit(grad(_spectral_score_jax, argnums=0))
@@ -56,38 +57,57 @@ if JAX_AVAILABLE:
 
     @partial(jax.jit, static_argnums=(4,))
     def _krylov_score_jax(lambdas, hams_array, phi, psi, m):
-        """JIT-compiled Krylov score using Lanczos."""
+        """JIT-compiled Krylov score with masked breakdown handling.
+
+        Uses jax.lax.scan (fixed iteration count) but tracks column validity.
+        After Krylov breakdown (beta < tol), subsequent columns are zeroed
+        and masked out of the projection.
+        """
         H = jnp.tensordot(lambdas, hams_array, axes=(0, 0))
         d = H.shape[0]
 
         phi_norm = jnp.linalg.norm(phi)
         v = phi / phi_norm
 
-        # Fixed-size Lanczos (no early termination for JIT compatibility)
         V = jnp.zeros((d, m), dtype=jnp.complex128)
         V = V.at[:, 0].set(v)
-        beta_prev = 0.0
-        v_prev = jnp.zeros(d, dtype=jnp.complex128)
+
+        # valid_mask tracks which columns are meaningful Krylov vectors
+        valid_mask = jnp.zeros(m, dtype=jnp.float64)
+        valid_mask = valid_mask.at[0].set(1.0)
 
         def lanczos_step(carry, j):
-            V, beta_prev, v_prev = carry
-            v_j = V[:, j]
+            V, beta_prev, v_prev, valid_mask = carry
+            is_prev_valid = valid_mask[j]
+            v_j = V[:, j] * is_prev_valid
             w = H @ v_j
             alpha = jnp.real(jnp.vdot(v_j, w))
-            w = w - alpha * v_j - beta_prev * v_prev
-            beta = jnp.linalg.norm(w)
-            # Use safe division (beta=0 means breakdown but we continue with zeros)
-            v_next = jnp.where(beta > 1e-14, w / beta, jnp.zeros_like(w))
+            w = w - alpha * v_j - beta_prev * v_prev * is_prev_valid
+
+            # Safe norm: epsilon inside sqrt prevents NaN gradient
+            beta_sq = jnp.real(jnp.vdot(w, w))
+            beta = jnp.sqrt(beta_sq + 1e-300)
+            is_valid = beta_sq > 1e-28
+
+            v_next = (w / beta) * jnp.where(is_valid & (is_prev_valid > 0.5), 1.0, 0.0)
             V = V.at[:, j + 1].set(v_next)
-            return (V, beta, v_j), None
 
-        (V, _, _), _ = jax.lax.scan(lanczos_step, (V, 0.0, jnp.zeros(d, dtype=jnp.complex128)),
-                                      jnp.arange(m - 1))
+            col_valid = jnp.where(is_valid & (is_prev_valid > 0.5), 1.0, 0.0)
+            valid_mask = valid_mask.at[j + 1].set(col_valid)
 
-        # QR for numerical stability
-        Q, _ = jnp.linalg.qr(V)
-        c = Q.conj().T @ psi
-        R = jnp.real(jnp.vdot(c, c))
+            return (V, beta, v_j, valid_mask), None
+
+        (V, _, _, valid_mask), _ = jax.lax.scan(
+            lanczos_step,
+            (V, 0.0, jnp.zeros(d, dtype=jnp.complex128), valid_mask),
+            jnp.arange(m - 1),
+        )
+
+        # Project psi onto Krylov basis (no QR — matches NumPy gradient path)
+        # QR is not used because autodiff through QR fails with zero columns
+        c = V.conj().T @ psi  # (m,)
+        c_masked = c * valid_mask
+        R = jnp.real(jnp.vdot(c_masked, c_masked))
         return jnp.clip(R, 0.0, 1.0)
 
     @partial(jax.jit, static_argnums=(4,))
