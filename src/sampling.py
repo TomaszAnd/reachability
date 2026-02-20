@@ -313,3 +313,136 @@ class DensitySweep:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(path, index=False)
+
+
+@dataclass
+class AdaptiveSweepConfig(SweepConfig):
+    """Configuration for adaptive density sweep with early termination.
+
+    Instead of fixed n_hamiltonians * n_targets trials per K, adaptively
+    stops early when statistical confidence is achieved or when P is
+    clearly near 0 or 1.
+    """
+    min_hamiltonians: int = 20
+    max_hamiltonians: int = 150
+    target_sem: float = 0.02
+    batch_size: int = 10
+    zero_threshold: float = 0.01
+
+    @classmethod
+    def fast(cls) -> 'AdaptiveSweepConfig':
+        """Quick validation config."""
+        return cls(min_hamiltonians=10, max_hamiltonians=30,
+                   n_targets=5, maxiter=50, restarts=2,
+                   target_sem=0.05, batch_size=5)
+
+    @classmethod
+    def production(cls, dim: Optional[int] = None) -> 'AdaptiveSweepConfig':
+        """Publication-quality config."""
+        maxiter = 100 if dim is None or dim <= 32 else 150
+        return cls(min_hamiltonians=30, max_hamiltonians=200,
+                   n_targets=20, maxiter=maxiter, restarts=3,
+                   target_sem=0.015, batch_size=10)
+
+
+class AdaptiveSweep(DensitySweep):
+    """
+    Adaptive Monte Carlo sweep with early termination.
+
+    Like DensitySweep but adaptively adjusts the number of Hamiltonian
+    samples per K value based on statistical confidence:
+    - Stops early when SEM < target_sem for all criteria
+    - Stops early when all criteria show P < zero_threshold
+    - Uses at least min_hamiltonians and at most max_hamiltonians
+    """
+
+    def __init__(self, model: QuantumModel, config: Optional[AdaptiveSweepConfig] = None):
+        cfg = config or AdaptiveSweepConfig()
+        super().__init__(model, cfg)
+
+    def run(
+        self,
+        K_values: List[int],
+        criteria: Optional[List[str]] = None,
+        verbose: bool = True,
+        early_stop_zeros: int = 0,
+    ) -> pd.DataFrame:
+        if criteria is None:
+            criteria = ['moment', 'spectral', 'krylov']
+
+        cfg = self.config
+        d = self.model.dim
+        phi = self.model.init_state()
+        consecutive_zeros = 0
+
+        for K in K_values:
+            if K > self.model.K:
+                if verbose:
+                    print(f"  K={K} > K_max={self.model.K}, skipping")
+                continue
+
+            if verbose:
+                print(f"  K={K}/{K_values[-1]}, rho={K/d**2:.4f}...", end=" ",
+                      flush=True)
+
+            counts = {c: 0 for c in criteria}
+            raw_scores = {c: [] for c in criteria}
+            n_hams_done = 0
+
+            child_seeds = self.model._seed_seq.spawn(cfg.max_hamiltonians)
+
+            while n_hams_done < cfg.max_hamiltonians:
+                # Process a batch
+                batch_end = min(n_hams_done + cfg.batch_size, cfg.max_hamiltonians)
+                for h_idx in range(n_hams_done, batch_end):
+                    sub_seed = int(child_seeds[h_idx].generate_state(1)[0])
+                    local_counts, local_scores = self._evaluate_submodel(
+                        sub_seed, K, phi, criteria)
+                    for c in criteria:
+                        counts[c] += local_counts[c]
+                        raw_scores[c].extend(local_scores[c])
+
+                n_hams_done = batch_end
+                n_trials = n_hams_done * cfg.n_targets
+
+                # Don't check early stopping until minimum reached
+                if n_hams_done < cfg.min_hamiltonians:
+                    continue
+
+                # Check if all criteria are confident enough
+                all_confident = True
+                all_near_zero = True
+                for c in criteria:
+                    P = counts[c] / n_trials if n_trials > 0 else 0.0
+                    sem = compute_binomial_sem(P, n_trials)
+                    if P > cfg.zero_threshold:
+                        all_near_zero = False
+                    if P > cfg.zero_threshold and P < 1 - cfg.zero_threshold:
+                        if sem > cfg.target_sem:
+                            all_confident = False
+
+                if all_near_zero or all_confident:
+                    break
+
+            n_trials = n_hams_done * cfg.n_targets
+            row = self._build_row(K, criteria, counts, raw_scores, n_trials)
+            row['n_hamiltonians_used'] = n_hams_done
+            self._results.append(row)
+
+            if verbose:
+                parts = [f"{c}={row[f'{c}_P']:.2f}" for c in criteria]
+                parts.append(f"n_h={n_hams_done}")
+                print(", ".join(parts))
+
+            if early_stop_zeros > 0:
+                all_zero = all(row[f'{c}_P'] == 0 for c in criteria)
+                if all_zero:
+                    consecutive_zeros += 1
+                    if consecutive_zeros >= early_stop_zeros:
+                        if verbose:
+                            print(f"  Early stop: {early_stop_zeros} consecutive zeros")
+                        break
+                else:
+                    consecutive_zeros = 0
+
+        return pd.DataFrame(self._results)
