@@ -31,6 +31,8 @@ except ImportError:
     logger.debug("JAX not available, criteria_jax will not function")
 
 if JAX_AVAILABLE:
+    jax.config.update("jax_enable_x64", True)
+
     from .criteria import (
         OptimizableCriterion, ReachabilityResult, Verdict,
         DEFAULT_BOUNDS, DEFAULT_METHOD, DEFAULT_RESTARTS, DEFAULT_MAXITER, DEFAULT_FTOL,
@@ -50,7 +52,9 @@ if JAX_AVAILABLE:
 
     _spectral_grad_jax = jit(grad(_spectral_score_jax, argnums=0))
 
-    @jit
+    from functools import partial
+
+    @partial(jax.jit, static_argnums=(4,))
     def _krylov_score_jax(lambdas, hams_array, phi, psi, m):
         """JIT-compiled Krylov score using Lanczos."""
         H = jnp.tensordot(lambdas, hams_array, axes=(0, 0))
@@ -86,7 +90,9 @@ if JAX_AVAILABLE:
         R = jnp.real(jnp.vdot(c, c))
         return jnp.clip(R, 0.0, 1.0)
 
-    _krylov_grad_jax = jit(grad(_krylov_score_jax, argnums=0))
+    @partial(jax.jit, static_argnums=(4,))
+    def _krylov_grad_jax(lambdas, hams_array, phi, psi, m):
+        return grad(_krylov_score_jax, argnums=0)(lambdas, hams_array, phi, psi, m)
 
     class SpectralCriterionJAX(OptimizableCriterion):
         """JAX-accelerated Spectral criterion for GPU execution."""
