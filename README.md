@@ -3,8 +3,8 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Test whether a target quantum state |phi> is reachable from initial state |psi>
-under parameterized Hamiltonian H(lambda) = sum_k lambda_k H_k,
+Test whether a target quantum state |ψ⟩ is reachable from initial state |φ⟩
+under parameterized Hamiltonian H(λ) = Σ_k λ_k H_k,
 without explicit time evolution.
 
 ## Installation
@@ -24,39 +24,49 @@ model = CanonicalQuditModel(dim=8, seed=42)
 submodel = model.sample_submodel(10)
 
 # Test reachability
-psi = submodel.init_state()
-phi = submodel.random_state()
-result = SpectralCriterion(submodel, psi, phi, tau=0.99).is_reachable()
+phi = submodel.init_state()
+psi = submodel.random_state()
+result = SpectralCriterion(submodel, phi, psi, tau=0.99).is_reachable()
 print(f"{result.verdict.value}: score={result.score:.3f}")
 ```
 
 See [`notebooks/quickstart.ipynb`](notebooks/quickstart.ipynb) for a complete tutorial.
 
-## API Overview
-
-### Models
-
-| Class | Description |
-|-------|-------------|
-| `CanonicalQuditModel` | Generalized Pauli basis {X_jk, Y_jk, Z_j, I} for dimension d |
-| `QubitGridModel` | Two-local Paulis on nx x ny qubit lattice (d = 2^(nx*ny)) |
-
-### Criteria
+## Reachability Criteria
 
 | Criterion | Method | Verdict |
 |-----------|--------|---------|
-| **Spectral** | Maximize S(lambda) = sum_n \|<u_n\|phi>* <u_n\|psi>\| | REACHABLE if S >= tau, else UNREACHABLE |
-| **Krylov** | Maximize R(lambda) = \|\|P_Km \|phi>\|\|^2 | REACHABLE if R >= tau, else UNREACHABLE |
-| **Moment** | Check Q + gamma*LL^T > 0 (no optimization) | UNREACHABLE if definite, else INCONCLUSIVE |
+| **Spectral** | Maximize spectral overlap S(λ) via L-BFGS-B | REACHABLE if S ≥ τ, else UNREACHABLE |
+| **Krylov** | Maximize Krylov projection R(λ) via Lanczos + L-BFGS-B | REACHABLE if R ≥ τ, else UNREACHABLE |
+| **Moment** | Check Q + γLL^T ≻ 0 (no optimization needed) | UNREACHABLE if definite, else INCONCLUSIVE |
 
-### Sweeps
+## Monte Carlo Sweeps
+
+Sweep over operator count K to measure P(unreachable) as a function of density ρ = K/d²:
 
 ```python
+from src.models import CanonicalQuditModel
 from src.sampling import DensitySweep, SweepConfig
 
-sweep = DensitySweep(model, SweepConfig.fast())
-results = sweep.run(K_values=[5, 10, 15, 20])
+model = CanonicalQuditModel(dim=16, seed=42)
+config = SweepConfig(n_hamiltonians=20, n_targets=10, tau=0.99)
+sweep = DensitySweep(model, config)
+results = sweep.run(K_values=[5, 10, 15, 20, 25],
+                    criteria=['moment', 'spectral', 'krylov'])
+print(results[['K', 'rho', 'moment_P', 'spectral_P', 'krylov_P']])
 ```
+
+## Hamiltonian Families
+
+| Model | Basis | Dimension |
+|-------|-------|-----------|
+| `CanonicalQuditModel` | Generalized Pauli basis {X_jk, Y_jk, Z_j} | Any d |
+| `QubitGridModel` | 1- and 2-local Paulis on nx×ny lattice | d = 2^(nx·ny) |
+
+## Notebooks
+
+- [`quickstart.ipynb`](notebooks/quickstart.ipynb) — Getting started with both models (~5-8 min)
+- [`krylov_qubitgrid_analysis.ipynb`](notebooks/krylov_qubitgrid_analysis.ipynb) — Why Krylov P=0 for QubitGrid
 
 ## Project Structure
 
@@ -68,16 +78,16 @@ src/                    Core library
 ├── math_utils.py       Eigendecomposition, Hamiltonian construction
 └── plotting.py         Color schemes (DIM_COLORS, CRIT_COLORS)
 
-notebooks/quickstart.ipynb   Interactive tutorial
-scripts/production/          Overnight experiments
-scripts/tests/               Test suite (34 tests)
+notebooks/              Interactive tutorials
+scripts/production/     Overnight experiments
+scripts/tests/          Test suite (34 tests)
 ```
 
 ## Running Tests
 
 ```bash
-python scripts/tests/run_all_tests.py         # Full suite
-python scripts/tests/run_all_tests.py --quick  # Quick mode (~7s)
+python scripts/tests/run_all_tests.py         # Full suite (34 tests)
+python scripts/tests/run_all_tests.py --quick  # Quick mode (~1s)
 ```
 
 ## License
