@@ -325,24 +325,33 @@ class SpectralCriterion(OptimizableCriterion):
         inv_delta_E = delta_E / (delta_E**2 + eps_reg)
 
         # dS/dlambda_k = sum_n Re[sign(c_n)* dc_n/dlambda_k]
-        grad = np.zeros(self.K)
         U = eigenvectors
-        weighted_inv_phi = inv_delta_E * phi_coeffs[None, :]  # (d, d)
-        weighted_inv_psi = inv_delta_E * psi_coeffs[None, :]  # (d, d)
         sign_c_conj = sign_c.conj()
 
-        for k in range(self.K):
-            if self._use_sparse:
-                HkU = self.hams_sparse[k] @ U
-                if issparse(HkU):
-                    HkU = HkU.toarray()
-                Hk_eig = U.conj().T @ HkU
-            else:
-                Hk_eig = U.conj().T @ self.hams[k] @ U
-            dphi = np.sum(Hk_eig * weighted_inv_phi, axis=1)
-            dpsi = np.sum(Hk_eig * weighted_inv_psi, axis=1)
-            dc = dpsi.conj() * phi_coeffs + psi_coeffs.conj() * dphi
-            grad[k] = np.real(np.sum(sign_c_conj * dc))
+        # Vectorized gradient: compute all U^T H_k U at once
+        # Hk_eig_all has shape (K, d, d)
+        if self._use_sparse:
+            # Sparse: compute H_k @ U for each k, then batch U^T @ result
+            HkU_all = np.empty((self.K, self.dim, self.dim), dtype=np.complex128)
+            for k in range(self.K):
+                r = self.hams_sparse[k] @ U
+                HkU_all[k] = r.toarray() if issparse(r) else r
+            Hk_eig_all = np.einsum('id,kdi->kdi', U.conj(), HkU_all)
+            # Actually we need full matrix: U^T @ HkU = (d,d) for each k
+            Hk_eig_all = np.einsum('di,kdj->kij', U.conj(), HkU_all)
+        else:
+            # Dense: batched matmul using _hams_array (K, d, d)
+            HkU_all = self._hams_array @ U  # (K, d, d)
+            Hk_eig_all = np.einsum('di,kdj->kij', U.conj(), HkU_all)
+
+        # dphi[k,n] = sum_m Hk_eig[k,n,m] * inv_delta_E[n,m] * phi_coeffs[m]
+        weighted_inv_phi = inv_delta_E * phi_coeffs[None, :]  # (d, d)
+        weighted_inv_psi = inv_delta_E * psi_coeffs[None, :]  # (d, d)
+        dphi_all = np.einsum('knm,nm->kn', Hk_eig_all, weighted_inv_phi)
+        dpsi_all = np.einsum('knm,nm->kn', Hk_eig_all, weighted_inv_psi)
+
+        dc_all = dpsi_all.conj() * phi_coeffs[None, :] + psi_coeffs.conj()[None, :] * dphi_all
+        grad = np.real(np.einsum('n,kn->k', sign_c_conj, dc_all))
 
         return S, grad
 
