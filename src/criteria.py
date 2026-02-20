@@ -31,6 +31,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from scipy.optimize import minimize
+from scipy.sparse import issparse, csr_matrix
 
 from .math_utils import (
     KRYLOV_BREAKDOWN_TOL,
@@ -87,15 +88,23 @@ class ReachabilityCriterion(ABC):
         if isinstance(model_or_hams, QuantumModel):
             self.model = model_or_hams
             self.hams = model_or_hams.basis
+            self.hams_sparse = model_or_hams.basis_sparse
         else:
             self.model = None
             self.hams = model_or_hams
+            # Check if list of sparse matrices was passed
+            if model_or_hams and issparse(model_or_hams[0]):
+                self.hams_sparse = model_or_hams
+                self.hams = [op.toarray() for op in model_or_hams]
+            else:
+                self.hams_sparse = None
         self.phi = phi.flatten()
         self.psi = psi.flatten()
         self.tau = tau
         self.K = len(self.hams)
         self.dim = self.hams[0].shape[0]
         self._hams_array_cache = None  # Lazy; built on first access
+        self._use_sparse = self.hams_sparse is not None
 
     @property
     def _hams_array(self) -> np.ndarray:
@@ -103,6 +112,19 @@ class ReachabilityCriterion(ABC):
         if self._hams_array_cache is None:
             self._hams_array_cache = np.stack(self.hams)
         return self._hams_array_cache
+
+    def _construct_H_sparse(self, lambdas: np.ndarray):
+        """Build H(lambda) using sparse operators. Returns sparse or dense."""
+        if self._use_sparse:
+            H = lambdas[0] * self.hams_sparse[0]
+            for i in range(1, self.K):
+                H = H + lambdas[i] * self.hams_sparse[i]
+            return H
+        return np.tensordot(lambdas, self._hams_array, axes=(0, 0))
+
+    def _construct_H_dense(self, lambdas: np.ndarray) -> np.ndarray:
+        """Build H(lambda) as dense array."""
+        return np.tensordot(lambdas, self._hams_array, axes=(0, 0))
 
     def clear_cache(self) -> None:
         """Clear cached arrays to free memory."""
@@ -262,7 +284,11 @@ class SpectralCriterion(OptimizableCriterion):
             6. (If gradient) Perturbation theory for dS/dlambda_k
         """
         # Step 1: Build combined Hamiltonian
-        H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
+        if self._use_sparse:
+            H_sp = self._construct_H_sparse(lambdas)
+            H = H_sp.toarray() if issparse(H_sp) else H_sp
+        else:
+            H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
 
         # Step 2: Eigendecomposition
         try:
@@ -306,7 +332,13 @@ class SpectralCriterion(OptimizableCriterion):
         sign_c_conj = sign_c.conj()
 
         for k in range(self.K):
-            Hk_eig = U.conj().T @ self.hams[k] @ U
+            if self._use_sparse:
+                HkU = self.hams_sparse[k] @ U
+                if issparse(HkU):
+                    HkU = HkU.toarray()
+                Hk_eig = U.conj().T @ HkU
+            else:
+                Hk_eig = U.conj().T @ self.hams[k] @ U
             dphi = np.sum(Hk_eig * weighted_inv_phi, axis=1)
             dpsi = np.sum(Hk_eig * weighted_inv_psi, axis=1)
             dc = dpsi.conj() * phi_coeffs + psi_coeffs.conj() * dphi
@@ -346,13 +378,16 @@ class KrylovCriterion(OptimizableCriterion):
 
     # -- Internal: Lanczos iteration --
 
-    def _lanczos_basis(self, H: np.ndarray) -> np.ndarray:
+    def _lanczos_basis(self, H) -> np.ndarray:
         """
         Build orthonormal Krylov basis K_m(H, phi) via Lanczos iteration.
 
         For Hermitian H, Lanczos uses a 3-term recurrence instead of full
         Gram-Schmidt orthogonalization (Arnoldi). This gives equivalent results
         with O(d) work per step instead of O(d*j).
+
+        H can be dense (ndarray) or sparse (csr_matrix). When sparse,
+        the matvec H @ v is O(nnz) instead of O(d^2).
 
         Returns (d, m_actual) matrix with orthonormal columns.
         m_actual <= m due to possible Krylov breakdown.
@@ -372,6 +407,8 @@ class KrylovCriterion(OptimizableCriterion):
 
         for j in range(m - 1):
             w = H @ V[:, j]
+            if issparse(H):
+                w = np.asarray(w).ravel()
             alpha = np.real(np.vdot(V[:, j], w))
             w -= alpha * V[:, j]
             if j > 0:
@@ -401,9 +438,13 @@ class KrylovCriterion(OptimizableCriterion):
             3. Project: c = V^dag |psi>
             4. Score: R = ||c||^2
             5. (If gradient) Differentiate through Lanczos 3-term recurrence
+
+        Uses sparse H when available for O(K*nnz*m) vs O(K*d^2*m).
         """
         # Steps 1-4: Score computation via Lanczos
-        H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
+        # Use sparse H for forward pass when available
+        H_sparse = self._construct_H_sparse(lambdas) if self._use_sparse else None
+        H = H_sparse if H_sparse is not None else self._construct_H_dense(lambdas)
 
         if not return_gradient:
             V = self._lanczos_basis(H)
@@ -412,23 +453,11 @@ class KrylovCriterion(OptimizableCriterion):
             return np.clip(R, 0.0, 1.0)
 
         # Step 5: Lanczos iteration with gradient differentiation
-        #
-        # Lanczos 3-term recurrence for Hermitian H:
-        #   w = H v_j - alpha_j v_j - beta_{j-1} v_{j-1}
-        # where alpha_j = Re(v_j† H v_j), beta_j = ||w||.
-        #
-        # Differentiating w.r.t. lambda_k (denoting d/dlambda_k as d prefix):
-        #   dw_k  = H_k v_j + H dv_j_k
-        #   dalpha_k = Re(dv_j_k† w + v_j† dw_k)
-        #   dwtilde_k = dw_k - dalpha_k v_j - alpha_j dv_j_k
-        #                     - dbeta_{j-1}_k v_{j-1} - beta_{j-1} dv_{j-1}_k
-        #   dbeta_k = Re(wtilde† dwtilde_k) / beta_j
-        #   dv_{j+1}_k = (dwtilde_k - dbeta_k v_{j+1}) / beta_j
-        #
-        # Each step is O(K*d) instead of Arnoldi's O(K*d*j), giving
-        # O(K*d*m) total gradient cost vs Arnoldi's O(K*d*m^2).
+        # For gradient, we need dense H for matmul with dV batch.
+        # But H_k matvecs use sparse when available.
+        H_dense = H.toarray() if issparse(H) else H
 
-        d = H.shape[0]
+        d = self.dim
         m = min(self.m, d)
         phi_norm = np.linalg.norm(self.phi)
         if phi_norm == 0:
@@ -440,7 +469,6 @@ class KrylovCriterion(OptimizableCriterion):
         V = np.zeros((d, m), dtype=np.complex128)
         dV = np.zeros((self.K, d, m), dtype=np.complex128)
         V[:, 0] = self.phi / phi_norm
-        # dV[:, :, 0] = 0 (phi is constant w.r.t. lambda)
 
         beta_prev = 0.0
         dbeta_prev = np.zeros(self.K)
@@ -448,13 +476,22 @@ class KrylovCriterion(OptimizableCriterion):
 
         for j in range(m - 1):
             v_j = V[:, j]
-            w = H @ v_j
+            w = H_dense @ v_j
+
             # dw[k] = H_k @ v_j + H @ dV[k, :, j]
-            dw = self._hams_array @ v_j + (H @ dV[:, :, j].T).T
+            if self._use_sparse:
+                # Sparse H_k @ v_j for each k: O(K * nnz)
+                hk_vj = np.empty((self.K, d), dtype=np.complex128)
+                for k in range(self.K):
+                    r = self.hams_sparse[k] @ v_j
+                    hk_vj[k] = np.asarray(r).ravel()
+                dw = hk_vj + (H_dense @ dV[:, :, j].T).T
+            else:
+                dw = self._hams_array @ v_j + (H_dense @ dV[:, :, j].T).T
 
             # Lanczos coefficients and their derivatives
             alpha = np.real(np.vdot(v_j, w))
-            dalpha = np.real(dV[:, :, j].conj() @ w + dw @ v_j.conj())  # (K,)
+            dalpha = np.real(dV[:, :, j].conj() @ w + dw @ v_j.conj())
 
             # 3-term recurrence
             w_tilde = w - alpha * v_j
@@ -470,8 +507,7 @@ class KrylovCriterion(OptimizableCriterion):
                 actual_m = j + 1
                 break
 
-            # Derivative of beta = ||w_tilde||
-            dbeta = np.real(dw_tilde @ w_tilde.conj()) / beta  # (K,)
+            dbeta = np.real(dw_tilde @ w_tilde.conj()) / beta
 
             V[:, j + 1] = w_tilde / beta
             dV[:, :, j + 1] = (dw_tilde - dbeta[:, None] * V[:, j + 1]) / beta
@@ -483,12 +519,12 @@ class KrylovCriterion(OptimizableCriterion):
         dV = dV[:, :, :actual_m]
 
         # Score: R = ||V† psi||^2
-        c = V.conj().T @ self.psi  # (actual_m,)
+        c = V.conj().T @ self.psi
         R = float(np.real(np.vdot(c, c)))
         R = np.clip(R, 0.0, 1.0)
 
         # Gradient: dR/dlambda_k = 2 Re(c† dc_k)
-        dc_all = dV.conj().transpose(0, 2, 1) @ self.psi  # (K, actual_m)
+        dc_all = dV.conj().transpose(0, 2, 1) @ self.psi
         grad = 2.0 * np.real(np.einsum('i,ki->k', c.conj(), dc_all))
 
         return R, grad
@@ -549,17 +585,26 @@ class MomentCriterion(ReachabilityCriterion):
         """
         phi = self.phi
         psi = self.psi
-        hams = self._hams_array  # (K, d, d)
+
+        # Compute H_k @ psi and H_k @ phi for all k
+        if self._use_sparse:
+            Hpsi = np.empty((self.K, self.dim), dtype=np.complex128)
+            Hphi = np.empty((self.K, self.dim), dtype=np.complex128)
+            for k in range(self.K):
+                r = self.hams_sparse[k] @ psi
+                Hpsi[k] = np.asarray(r).ravel()
+                r = self.hams_sparse[k] @ phi
+                Hphi[k] = np.asarray(r).ravel()
+        else:
+            hams = self._hams_array  # (K, d, d)
+            Hpsi = np.einsum('kij,j->ki', hams, psi)   # (K, d)
+            Hphi = np.einsum('kij,j->ki', hams, phi)   # (K, d)
 
         # L[k] = <H_k>_psi - <H_k>_phi (first moment difference)
-        # Vectorized: L[k] = Re(psi^H @ H_k @ psi - phi^H @ H_k @ phi)
-        Hpsi = np.einsum('kij,j->ki', hams, psi)   # (K, d)
-        Hphi = np.einsum('kij,j->ki', hams, phi)   # (K, d)
         L = np.real(np.einsum('d,kd->k', psi.conj(), Hpsi)
                     - np.einsum('d,kd->k', phi.conj(), Hphi))
 
         # Q[k,m] = <{H_k, H_m}>_psi - <{H_k, H_m}>_phi
-        # where {A,B} = AB + BA (paper Eq. 6, no 1/2 factor)
         # For Hermitian operators: <{H_k,H_m}> = 2*Re(<H_k H_m>)
         Q = 2 * (np.real(Hpsi.conj() @ Hpsi.T) - np.real(Hphi.conj() @ Hphi.T))
 

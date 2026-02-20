@@ -20,10 +20,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
-from scipy.sparse import csr_matrix, eye as speye, kron as spkron
+from scipy.sparse import csr_matrix, eye as speye, kron as spkron, issparse
 
 
 @dataclass
@@ -51,6 +51,7 @@ class QuantumModel(ABC):
         self._seed_seq = np.random.SeedSequence(seed)
         self._rng = np.random.default_rng(self._seed_seq)
         self._basis: Optional[List[np.ndarray]] = None
+        self._basis_sparse: Optional[List[csr_matrix]] = None
         self._metadata = ModelMetadata()
 
     @abstractmethod
@@ -58,17 +59,49 @@ class QuantumModel(ABC):
         """Build the complete operator basis as numpy arrays."""
         pass
 
+    def _build_basis_sparse(self) -> Optional[List[csr_matrix]]:
+        """Build sparse operator basis. Override in subclasses with native sparse support."""
+        return None
+
     @property
     def basis(self) -> List[np.ndarray]:
         """Lazily-built operator basis as list of (d, d) numpy arrays."""
         if self._basis is None:
-            self._basis = self._build_basis()
-            self._metadata.parent_basis_size = len(self._basis)
+            # Try sparse first, convert to dense
+            if self._basis_sparse is not None:
+                self._basis = [op.toarray() for op in self._basis_sparse]
+            else:
+                sparse = self._build_basis_sparse()
+                if sparse is not None:
+                    self._basis_sparse = sparse
+                    self._basis = [op.toarray() for op in sparse]
+                    self._metadata.parent_basis_size = len(self._basis)
+                else:
+                    self._basis = self._build_basis()
+                    self._metadata.parent_basis_size = len(self._basis)
         return self._basis
+
+    @property
+    def basis_sparse(self) -> Optional[List[csr_matrix]]:
+        """Sparse operator basis, if available. None for dense-only models."""
+        if self._basis_sparse is None:
+            self._basis_sparse = self._build_basis_sparse()
+            if self._basis_sparse is not None:
+                self._metadata.parent_basis_size = len(self._basis_sparse)
+        return self._basis_sparse
+
+    @property
+    def has_sparse(self) -> bool:
+        """Whether this model has a sparse basis representation."""
+        return self.basis_sparse is not None
 
     @property
     def K(self) -> int:
         """Number of control operators in this model."""
+        if self._basis is not None:
+            return len(self._basis)
+        if self._basis_sparse is not None:
+            return len(self._basis_sparse)
         return len(self.basis)
 
     @property
@@ -132,13 +165,18 @@ class _SubModel(QuantumModel):
     """A submodel created by selecting operators from a parent model."""
 
     def __init__(self, dim: int, operators: List[np.ndarray],
-                 metadata: ModelMetadata, seed: Optional[int] = None):
+                 metadata: ModelMetadata, seed: Optional[int] = None,
+                 operators_sparse: Optional[List[csr_matrix]] = None):
         super().__init__(dim, seed)
         self._basis = operators
+        self._basis_sparse = operators_sparse
         self._metadata = metadata
 
     def _build_basis(self) -> List[np.ndarray]:
         return self._basis
+
+    def _build_basis_sparse(self) -> Optional[List[csr_matrix]]:
+        return self._basis_sparse
 
     def sample_submodel(self, k: int, seed: Optional[int] = None) -> 'QuantumModel':
         if k > self.K:
@@ -148,14 +186,19 @@ class _SubModel(QuantumModel):
             raise ValueError(f"Need at least 2 operators, got k={k}")
         rng = np.random.default_rng(seed) if seed is not None else self._rng
         indices = rng.choice(self.K, size=k, replace=False)
-        ops = [self._basis[i] for i in indices]
+        ops = [self._basis[i] for i in indices] if self._basis is not None else None
+        ops_sparse = ([self._basis_sparse[i] for i in indices]
+                      if self._basis_sparse is not None else None)
+        if ops is None and ops_sparse is not None:
+            ops = [s.toarray() for s in ops_sparse]
         meta = ModelMetadata(
             parent_basis_size=self.K,
             selected_indices=indices,
             description=f"Sub-submodel: {k} of {self.K} operators",
         )
         child_seed = int(self._seed_seq.spawn(1)[0].generate_state(1)[0])
-        return _SubModel(self.dim, ops, meta, seed=child_seed)
+        return _SubModel(self.dim, ops, meta, seed=child_seed,
+                         operators_sparse=ops_sparse)
 
 
 class CanonicalQuditModel(QuantumModel):
@@ -243,6 +286,8 @@ LATTICE_CONFIGS = {
     16: (2, 2),
     32: (1, 5),
     64: (2, 3),
+    128: (1, 7),   # 7 qubits
+    256: (2, 4),   # 8 qubits
 }
 
 
@@ -300,8 +345,8 @@ class QubitGridModel(QuantumModel):
                     edges.append((site, 0 * self.nx + x))
         return edges
 
-    def _build_basis(self) -> List[np.ndarray]:
-        """Build Pauli basis P_2(G) using sparse matrix operations."""
+    def _build_basis_sparse(self) -> List[csr_matrix]:
+        """Build Pauli basis P_2(G) as sparse matrices (native format)."""
         pauli_x = csr_matrix(np.array([[0, 1], [1, 0]], dtype=complex))
         pauli_y = csr_matrix(np.array([[0, -1j], [1j, 0]], dtype=complex))
         pauli_z = csr_matrix(np.array([[1, 0], [0, -1]], dtype=complex))
@@ -318,7 +363,7 @@ class QubitGridModel(QuantumModel):
                     op = p
                 else:
                     op = spkron(op, p, format='csr')
-            return op.toarray()
+            return op
 
         # 1-local terms
         for site in range(self.n_sites):
@@ -338,6 +383,12 @@ class QubitGridModel(QuantumModel):
             f"Operator count mismatch: got {len(basis)}, expected {expected_L}")
 
         return basis
+
+    def _build_basis(self) -> List[np.ndarray]:
+        """Build dense Pauli basis (converts from sparse)."""
+        sparse = self._build_basis_sparse()
+        self._basis_sparse = sparse
+        return [op.toarray() for op in sparse]
 
     def sample_submodel(self, k: int, seed: Optional[int] = None) -> QuantumModel:
         """
@@ -360,7 +411,11 @@ class QubitGridModel(QuantumModel):
             raise ValueError(f"Need at least 2 operators, got k={k}")
 
         indices = self._rng.choice(L, size=k, replace=False)
-        ops = [self.basis[i] for i in indices]
+
+        # Select sparse operators (primary) and derive dense from them
+        sparse_basis = self.basis_sparse
+        ops_sparse = [sparse_basis[i] for i in indices]
+        ops = [s.toarray() for s in ops_sparse]
 
         meta = ModelMetadata(
             parent_basis_size=L,
@@ -369,4 +424,5 @@ class QubitGridModel(QuantumModel):
                         f"(lattice {self.nx}x{self.ny}, d={self.dim})",
         )
         child_seed = int(self._seed_seq.spawn(1)[0].generate_state(1)[0])
-        return _SubModel(self.dim, ops, meta, seed=child_seed)
+        return _SubModel(self.dim, ops, meta, seed=child_seed,
+                         operators_sparse=ops_sparse)
