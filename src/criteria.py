@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
@@ -165,26 +166,8 @@ class OptimizableCriterion(ReachabilityCriterion):
     NOT inherit from this class since it uses grid search instead.
     """
 
-    def _maximize(
-        self,
-        method: str = DEFAULT_METHOD,
-        restarts: int = DEFAULT_RESTARTS,
-        maxiter: int = DEFAULT_MAXITER,
-        ftol: float = DEFAULT_FTOL,
-        seed: Optional[int] = None,
-    ) -> Dict:
-        """
-        Multi-restart optimization to maximize the criterion score.
-
-        Generates `restarts` random starting points in [-1,1]^K and runs
-        L-BFGS-B (with analytical gradient) from each. Returns the best
-        result across all restarts.
-        """
-        K = self.K
-        bounds = DEFAULT_BOUNDS * K
-        rng = np.random.RandomState(seed or 42)
-        use_grad = (method == "L-BFGS-B")
-
+    def _single_restart(self, x0, method, maxiter, ftol, bounds, use_grad):
+        """Run a single optimization restart. Thread-safe."""
         def objective(x):
             if use_grad:
                 val, grad = self.evaluate(x, return_gradient=True)
@@ -192,31 +175,84 @@ class OptimizableCriterion(ReachabilityCriterion):
             else:
                 return -float(self.evaluate(x))
 
-        best_value = 0.0
-        best_x = np.zeros(K)
-        total_nfev = 0
+        try:
+            options = {"maxiter": maxiter, "ftol": ftol}
+            if use_grad:
+                result = minimize(objective, x0, method=method,
+                                  jac=True, bounds=bounds, options=options)
+            else:
+                result = minimize(objective, x0, method=method,
+                                  bounds=bounds, options=options)
+            return -result.fun, result.x.copy(), result.nfev
+        except Exception as e:
+            logger.debug(f"Optimization restart failed: {e}")
+            return 0.0, x0, 0
+
+    def _maximize(
+        self,
+        method: str = DEFAULT_METHOD,
+        restarts: int = DEFAULT_RESTARTS,
+        maxiter: int = DEFAULT_MAXITER,
+        ftol: float = DEFAULT_FTOL,
+        seed: Optional[int] = None,
+        parallel: bool = False,
+    ) -> Dict:
+        """
+        Multi-restart optimization to maximize the criterion score.
+
+        Generates `restarts` random starting points in [-1,1]^K and runs
+        L-BFGS-B (with analytical gradient) from each. Returns the best
+        result across all restarts.
+
+        Args:
+            parallel: If True, run restarts in parallel threads.
+                      Benefits mainly at large d where BLAS releases the GIL.
+        """
+        K = self.K
+        bounds = DEFAULT_BOUNDS * K
+        rng = np.random.RandomState(seed or 42)
+        use_grad = (method == "L-BFGS-B")
+
+        # Generate all starting points upfront
+        x0_list = [np.array([rng.uniform(lo, hi) for lo, hi in bounds])
+                    for _ in range(restarts)]
+
         start_time = time.time()
 
-        for _ in range(restarts):
-            x0 = np.array([rng.uniform(lo, hi) for lo, hi in bounds])
-            try:
-                options = {"maxiter": maxiter, "ftol": ftol}
-                if use_grad:
-                    result = minimize(objective, x0, method=method,
-                                      jac=True, bounds=bounds, options=options)
-                else:
-                    result = minimize(objective, x0, method=method,
-                                      bounds=bounds, options=options)
-                total_nfev += result.nfev
-                current = -result.fun
-                if current > best_value:
-                    best_value = current
-                    best_x = result.x.copy()
+        if parallel and restarts > 1:
+            # Parallel restarts via ThreadPoolExecutor
+            # NumPy/BLAS releases GIL during matrix operations
+            best_value = 0.0
+            best_x = np.zeros(K)
+            total_nfev = 0
+
+            with ThreadPoolExecutor(max_workers=min(restarts, 4)) as executor:
+                futures = {
+                    executor.submit(self._single_restart, x0, method,
+                                    maxiter, ftol, bounds, use_grad): i
+                    for i, x0 in enumerate(x0_list)
+                }
+                for future in as_completed(futures):
+                    value, x, nfev = future.result()
+                    total_nfev += nfev
+                    if value > best_value:
+                        best_value = value
+                        best_x = x
+        else:
+            # Sequential restarts (with early termination)
+            best_value = 0.0
+            best_x = np.zeros(K)
+            total_nfev = 0
+
+            for x0 in x0_list:
+                value, x, nfev = self._single_restart(
+                    x0, method, maxiter, ftol, bounds, use_grad)
+                total_nfev += nfev
+                if value > best_value:
+                    best_value = value
+                    best_x = x
                 if best_value >= self.tau:
-                    break  # Already reachable, skip remaining restarts
-            except Exception as e:
-                logger.debug(f"Optimization restart failed: {e}")
-                continue
+                    break  # Already reachable
 
         best_x = clip_to_bounds(best_x, bounds)
         runtime = time.time() - start_time
@@ -235,11 +271,13 @@ class OptimizableCriterion(ReachabilityCriterion):
         maxiter: int = DEFAULT_MAXITER,
         ftol: float = DEFAULT_FTOL,
         seed: Optional[int] = None,
+        parallel: bool = False,
     ) -> ReachabilityResult:
         """Maximize the criterion score and compare to tau threshold."""
         result = self._maximize(
             method=method, restarts=restarts,
             maxiter=maxiter, ftol=ftol, seed=seed,
+            parallel=parallel,
         )
         score = result["best_value"]
         verdict = Verdict.REACHABLE if score >= self.tau else Verdict.UNREACHABLE
