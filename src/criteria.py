@@ -368,19 +368,16 @@ class SpectralCriterion(OptimizableCriterion):
 
         # Vectorized gradient: compute all U^T H_k U at once
         # Hk_eig_all has shape (K, d, d)
+        Uc = U.conj().T  # (d, d)
         if self._use_sparse:
-            # Sparse: compute H_k @ U for each k, then batch U^T @ result
             HkU_all = np.empty((self.K, self.dim, self.dim), dtype=np.complex128)
             for k in range(self.K):
                 r = self.hams_sparse[k] @ U
                 HkU_all[k] = r.toarray() if issparse(r) else r
-            Hk_eig_all = np.einsum('id,kdi->kdi', U.conj(), HkU_all)
-            # Actually we need full matrix: U^T @ HkU = (d,d) for each k
-            Hk_eig_all = np.einsum('di,kdj->kij', U.conj(), HkU_all)
         else:
-            # Dense: batched matmul using _hams_array (K, d, d)
             HkU_all = self._hams_array @ U  # (K, d, d)
-            Hk_eig_all = np.einsum('di,kdj->kij', U.conj(), HkU_all)
+        # Batched U^T @ HkU: (d,d) @ (K,d,d) via broadcasting = (K,d,d)
+        Hk_eig_all = Uc @ HkU_all
 
         # dphi[k,n] = sum_m Hk_eig[k,n,m] * inv_delta_E[n,m] * phi_coeffs[m]
         weighted_inv_phi = inv_delta_E * phi_coeffs[None, :]  # (d, d)
