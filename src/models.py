@@ -189,8 +189,6 @@ class _SubModel(QuantumModel):
         ops = [self._basis[i] for i in indices] if self._basis is not None else None
         ops_sparse = ([self._basis_sparse[i] for i in indices]
                       if self._basis_sparse is not None else None)
-        if ops is None and ops_sparse is not None:
-            ops = [s.toarray() for s in ops_sparse]
         meta = ModelMetadata(
             parent_basis_size=self.K,
             selected_indices=indices,
@@ -412,10 +410,10 @@ class QubitGridModel(QuantumModel):
 
         indices = self._rng.choice(L, size=k, replace=False)
 
-        # Select sparse operators (primary) and derive dense from them
+        # Select sparse operators (primary); dense built lazily when needed
         sparse_basis = self.basis_sparse
         ops_sparse = [sparse_basis[i] for i in indices]
-        ops = [s.toarray() for s in ops_sparse]
+        ops = None  # Dense basis built lazily by _SubModel.basis property
 
         meta = ModelMetadata(
             parent_basis_size=L,

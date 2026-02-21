@@ -88,22 +88,32 @@ class ReachabilityCriterion(ABC):
         from .models import QuantumModel
         if isinstance(model_or_hams, QuantumModel):
             self.model = model_or_hams
-            self.hams = model_or_hams.basis
             self.hams_sparse = model_or_hams.basis_sparse
+            # Avoid building dense basis when sparse is available (saves ~119MB at d=256)
+            if self.hams_sparse is not None:
+                self.hams = None  # Dense basis built lazily via _hams_array
+                self.K = len(self.hams_sparse)
+                self.dim = self.hams_sparse[0].shape[0]
+            else:
+                self.hams = model_or_hams.basis
+                self.K = len(self.hams)
+                self.dim = self.hams[0].shape[0]
         else:
             self.model = None
-            self.hams = model_or_hams
             # Check if list of sparse matrices was passed
             if model_or_hams and issparse(model_or_hams[0]):
                 self.hams_sparse = model_or_hams
-                self.hams = [op.toarray() for op in model_or_hams]
+                self.hams = None
+                self.K = len(self.hams_sparse)
+                self.dim = self.hams_sparse[0].shape[0]
             else:
                 self.hams_sparse = None
+                self.hams = model_or_hams
+                self.K = len(self.hams)
+                self.dim = self.hams[0].shape[0]
         self.phi = phi.flatten()
         self.psi = psi.flatten()
         self.tau = tau
-        self.K = len(self.hams)
-        self.dim = self.hams[0].shape[0]
         self._hams_array_cache = None  # Lazy; built on first access
         self._use_sparse = self.hams_sparse is not None
 
@@ -111,7 +121,13 @@ class ReachabilityCriterion(ABC):
     def _hams_array(self) -> np.ndarray:
         """Lazily-constructed stacked Hamiltonians array (K, d, d)."""
         if self._hams_array_cache is None:
-            self._hams_array_cache = np.stack(self.hams)
+            if self.hams is not None:
+                self._hams_array_cache = np.stack(self.hams)
+            elif self.hams_sparse is not None:
+                self._hams_array_cache = np.stack(
+                    [op.toarray() for op in self.hams_sparse])
+            else:
+                raise RuntimeError("No Hamiltonian operators available")
         return self._hams_array_cache
 
     def _construct_H_sparse(self, lambdas: np.ndarray):
