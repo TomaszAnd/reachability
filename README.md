@@ -70,7 +70,8 @@ print(results[['K', 'rho', 'moment_P', 'spectral_P', 'krylov_P']])
 
 ## Notebooks
 
-- [`quickstart.ipynb`](notebooks/quickstart.ipynb) — Getting started with both models (~5-8 min)
+- [`quickstart.ipynb`](notebooks/quickstart.ipynb) — Getting started with both models (~10-15 min)
+- [`moment_nonmonotonicity_analysis.ipynb`](notebooks/moment_nonmonotonicity_analysis.ipynb) — Why Moment P(K) is non-monotonic
 - [`krylov_qubitgrid_analysis.ipynb`](notebooks/krylov_qubitgrid_analysis.ipynb) — Why Krylov P=0 for QubitGrid
 
 ## Project Structure
@@ -126,6 +127,23 @@ All optimization-based criteria (Spectral, Krylov) use L-BFGS-B:
 - Combined objective+gradient via `jac=True` (avoids duplicate eigendecomposition)
 - Multi-restart with early termination when score >= tau
 - Default: `maxiter=200`, `restarts=2`, `ftol=1e-6`
+
+**Adaptive restarts** ensure reliable convergence:
+
+| Condition | Effective restarts | Rationale |
+|-----------|-------------------|-----------|
+| K < 10 | max(restarts, 12-K) | Narrow basins at small K |
+| 0.05 < ρ < 0.30 | max(restarts, 8) | Hard landscape in transition |
+| d ≥ 32 | restarts + 2·⌊(d-32)/32⌋ | Harder at large dimension |
+| Always | ≥ 5 | Minimum for reliability |
+
+### Reachability Criteria Behavior
+
+| Criterion | Monotonic in K? | Speed | Notes |
+|-----------|-----------------|-------|-------|
+| Moment | **No** | Fastest | Sufficient condition; P can increase with K |
+| Spectral | Yes (guaranteed) | Medium | max over λ expands feasible set |
+| Krylov | Yes (guaranteed) | Medium | max over λ expands feasible set |
 
 ### Optional JAX Backend
 

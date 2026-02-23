@@ -247,13 +247,24 @@ class OptimizableCriterion(ReachabilityCriterion):
         rng = np.random.RandomState(seed or 42)
         use_grad = (method == "L-BFGS-B")
 
-        # Adaptive restarts: more restarts at small K (few parameters but
-        # local maxima) and at large d (harder optimization landscape).
+        # Adaptive restarts for reliable convergence.
+        # Without enough restarts, L-BFGS-B gets trapped in local maxima,
+        # producing false UNREACHABLE verdicts. Restarts are boosted
+        # adaptively based on K, dimension, and rho position.
         effective_restarts = restarts
+        # Small K: few parameters but many local maxima
         if K < 10:
-            effective_restarts = max(effective_restarts, 10 - K)
+            effective_restarts = max(effective_restarts, 18 - K)
+        # Transition region: hardest optimization landscape
+        rho = K / self.dim**2
+        if 0.04 < rho < 0.30:
+            effective_restarts = max(effective_restarts, 12)
+        # Large dimension: harder landscape
         if self.dim >= 32:
-            effective_restarts = max(effective_restarts, restarts + 2)
+            dim_factor = 1 + (self.dim - 32) // 32
+            effective_restarts = max(effective_restarts, restarts + 3 * dim_factor)
+        # Absolute minimum
+        effective_restarts = max(effective_restarts, 5)
 
         # Generate all starting points upfront
         x0_list = [np.array([rng.uniform(lo, hi) for lo, hi in bounds])
