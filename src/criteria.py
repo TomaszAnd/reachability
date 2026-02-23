@@ -653,6 +653,12 @@ class MomentCriterion(ReachabilityCriterion):
     - UNREACHABLE if certificate found (Q + gamma*LL^T > 0)
     - INCONCLUSIVE if no certificate found (does NOT mean reachable)
     - Never returns REACHABLE
+
+    Note: Unlike Spectral/Krylov, P(unreachable) is NOT guaranteed monotonically
+    decreasing in K. Adding operators changes Q and L structure, which can make
+    the positive definiteness certificate harder to find even though true
+    reachability has increased. This is inherent to the sufficient-condition nature
+    of the criterion, not a bug.
     """
 
     def __init__(

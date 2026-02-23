@@ -40,6 +40,11 @@ See [`notebooks/quickstart.ipynb`](notebooks/quickstart.ipynb) for a complete tu
 | **Krylov** | Maximize Krylov projection R(λ) via Lanczos + L-BFGS-B | REACHABLE if R ≥ τ, else UNREACHABLE |
 | **Moment** | Check Q + γLL^T ≻ 0 (no optimization needed) | UNREACHABLE if definite, else INCONCLUSIVE |
 
+**Note on Moment:** Unlike Spectral/Krylov, the Moment criterion tests a *sufficient* condition
+for unreachability. Its measured P(unreachable) is **not guaranteed monotonically decreasing** in K,
+because adding operators changes the Q and L matrices in ways that can make the positive
+definiteness certificate harder to find.
+
 ## Monte Carlo Sweeps
 
 Sweep over operator count K to measure P(unreachable) as a function of density ρ = K/d²:
