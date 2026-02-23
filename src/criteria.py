@@ -148,18 +148,14 @@ class ReachabilityCriterion(ABC):
                 raise RuntimeError("No Hamiltonian operators available")
         return self._hams_array_cache
 
-    def _construct_H_sparse(self, lambdas: np.ndarray):
-        """Build H(lambda) using COO assembly (5-12x faster than CSR loop)."""
+    def _construct_H(self, lambdas: np.ndarray):
+        """Build H(lambda), auto-selecting sparse COO or dense tensordot."""
         if self._use_sparse:
             scaled = np.repeat(lambdas, self._coo_nnz) * self._coo_data
             return coo_matrix(
                 (scaled, (self._coo_rows, self._coo_cols)),
                 shape=(self.dim, self.dim),
             ).tocsr()
-        return np.tensordot(lambdas, self._hams_array, axes=(0, 0))
-
-    def _construct_H_dense(self, lambdas: np.ndarray) -> np.ndarray:
-        """Build H(lambda) as dense array."""
         return np.tensordot(lambdas, self._hams_array, axes=(0, 0))
 
     def clear_cache(self) -> None:
@@ -358,7 +354,7 @@ class SpectralCriterion(OptimizableCriterion):
         """
         # Step 1: Build combined Hamiltonian
         if self._use_sparse:
-            H_sp = self._construct_H_sparse(lambdas)
+            H_sp = self._construct_H(lambdas)
             H = H_sp.toarray() if issparse(H_sp) else H_sp
         else:
             H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
@@ -525,8 +521,7 @@ class KrylovCriterion(OptimizableCriterion):
         """
         # Steps 1-4: Score computation via Lanczos
         # Use sparse H for forward pass when available
-        H_sparse = self._construct_H_sparse(lambdas) if self._use_sparse else None
-        H = H_sparse if H_sparse is not None else self._construct_H_dense(lambdas)
+        H = self._construct_H(lambdas)
 
         if not return_gradient:
             V = self._lanczos_basis(H)

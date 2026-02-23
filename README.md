@@ -114,7 +114,18 @@ to determine the best backend for your hardware.
 
 ### Optional JAX Backend
 
-Install `jax` for 12-97x Krylov speedup via JIT compilation (effective at d<=128).
+Install `jax` for Krylov speedup via JIT compilation:
+
+```bash
+pip install jax jaxlib
+```
+
+| Criterion | d <= 128 | d >= 256 |
+|-----------|----------|---------|
+| Krylov | JAX JIT: 12-97x faster | NumPy (autodiff unstable) |
+| Spectral | NumPy (scipy eigh optimal) | NumPy |
+| Moment | NumPy | NumPy |
+
 JAX is auto-detected by `scripts/production/sweep_production.py`.
 
 ### Recommended Sweep Configurations (d=256)

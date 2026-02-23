@@ -48,6 +48,28 @@ class SweepConfig:
         return cls(n_hamiltonians=150, n_targets=30, maxiter=maxiter, restarts=3)
 
 
+def _check_early_stop(row: Dict, criteria: List[str],
+                      early_stop_zeros: int,
+                      consecutive_zeros: int,
+                      verbose: bool) -> tuple:
+    """Check early-stopping condition for density sweeps.
+
+    Returns (should_stop, updated_consecutive_zeros).
+    """
+    if early_stop_zeros <= 0:
+        return False, consecutive_zeros
+    all_zero = all(row[f'{c}_P'] == 0 for c in criteria)
+    if all_zero:
+        consecutive_zeros += 1
+        if consecutive_zeros >= early_stop_zeros:
+            if verbose:
+                print(f"  Early stop: {early_stop_zeros} consecutive zeros")
+            return True, consecutive_zeros
+    else:
+        consecutive_zeros = 0
+    return False, consecutive_zeros
+
+
 class DensitySweep:
     """
     Monte Carlo sweep over operator count K.
@@ -206,17 +228,10 @@ class DensitySweep:
                 parts = [f"{c}={row[f'{c}_P']:.2f}" for c in criteria]
                 print(", ".join(parts))
 
-            # Early stopping: all criteria at P=0 for N consecutive K values
-            if early_stop_zeros > 0:
-                all_zero = all(row[f'{c}_P'] == 0 for c in criteria)
-                if all_zero:
-                    consecutive_zeros += 1
-                    if consecutive_zeros >= early_stop_zeros:
-                        if verbose:
-                            print(f"  Early stop: {early_stop_zeros} consecutive zeros")
-                        break
-                else:
-                    consecutive_zeros = 0
+            should_stop, consecutive_zeros = _check_early_stop(
+                row, criteria, early_stop_zeros, consecutive_zeros, verbose)
+            if should_stop:
+                break
 
         return pd.DataFrame(self._results)
 
@@ -294,16 +309,10 @@ class DensitySweep:
                 parts = [f"{c}={row[f'{c}_P']:.2f}" for c in criteria]
                 print(", ".join(parts))
 
-            if early_stop_zeros > 0:
-                all_zero = all(row[f'{c}_P'] == 0 for c in criteria)
-                if all_zero:
-                    consecutive_zeros += 1
-                    if consecutive_zeros >= early_stop_zeros:
-                        if verbose:
-                            print(f"  Early stop: {early_stop_zeros} consecutive zeros")
-                        break
-                else:
-                    consecutive_zeros = 0
+            should_stop, consecutive_zeros = _check_early_stop(
+                row, criteria, early_stop_zeros, consecutive_zeros, verbose)
+            if should_stop:
+                break
 
         return pd.DataFrame(self._results)
 
@@ -434,15 +443,9 @@ class AdaptiveSweep(DensitySweep):
                 parts.append(f"n_h={n_hams_done}")
                 print(", ".join(parts))
 
-            if early_stop_zeros > 0:
-                all_zero = all(row[f'{c}_P'] == 0 for c in criteria)
-                if all_zero:
-                    consecutive_zeros += 1
-                    if consecutive_zeros >= early_stop_zeros:
-                        if verbose:
-                            print(f"  Early stop: {early_stop_zeros} consecutive zeros")
-                        break
-                else:
-                    consecutive_zeros = 0
+            should_stop, consecutive_zeros = _check_early_stop(
+                row, criteria, early_stop_zeros, consecutive_zeros, verbose)
+            if should_stop:
+                break
 
         return pd.DataFrame(self._results)
