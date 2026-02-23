@@ -247,9 +247,13 @@ class OptimizableCriterion(ReachabilityCriterion):
         rng = np.random.RandomState(seed or 42)
         use_grad = (method == "L-BFGS-B")
 
+        # Adaptive restarts: at small K the landscape has few parameters
+        # but can still have local maxima that L-BFGS-B misses.
+        effective_restarts = max(restarts, 10 - K) if K < 10 else restarts
+
         # Generate all starting points upfront
         x0_list = [np.array([rng.uniform(lo, hi) for lo, hi in bounds])
-                    for _ in range(restarts)]
+                    for _ in range(effective_restarts)]
 
         start_time = time.time()
 
