@@ -9,7 +9,7 @@ this module provides the shared building blocks.
 from __future__ import annotations
 
 import warnings
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import numpy as np
 from scipy.optimize import curve_fit

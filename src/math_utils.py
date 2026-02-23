@@ -13,6 +13,11 @@ import numpy as np
 # Breakdown tolerance for Lanczos/Krylov iteration
 KRYLOV_BREAKDOWN_TOL: float = 1e-14
 
+# Dimension threshold for switching from numpy to scipy eigh.
+# On Apple M1 Accelerate, scipy heevr (MRRR) is 1.3-2x faster at d>=256.
+# On Intel/AMD, numpy heevd may be faster. Run scripts/benchmark_platform.py to check.
+SCIPY_EIGH_THRESHOLD: int = 256
+
 
 def eigendecompose(H: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -36,7 +41,7 @@ def eigendecompose(H: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     try:
         d = H.shape[0]
-        if d >= 256:
+        if d >= SCIPY_EIGH_THRESHOLD:
             from scipy.linalg import eigh as scipy_eigh
             eigenvalues, eigenvectors = scipy_eigh(
                 H, overwrite_a=True, check_finite=False

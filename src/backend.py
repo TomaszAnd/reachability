@@ -27,8 +27,6 @@ _JAX_AVAILABLE = False
 if _BACKEND_NAME == 'jax':
     try:
         import jax
-        import jax.numpy as jnp
-        from jax.numpy.linalg import eigh as jax_eigh
         _JAX_AVAILABLE = True
         logger.info("JAX backend active")
     except ImportError:

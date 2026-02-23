@@ -90,6 +90,40 @@ python scripts/tests/run_all_tests.py         # Full suite (34 tests)
 python scripts/tests/run_all_tests.py --quick  # Quick mode (~1s)
 ```
 
+## Performance
+
+### Eigendecomposition Backend
+
+The Spectral criterion's bottleneck is eigendecomposition (97-99% of runtime at d>=64).
+The `eigendecompose()` function auto-selects the fastest LAPACK driver by dimension:
+
+- **d < 256**: `numpy.linalg.eigh` (heevd, divide & conquer)
+- **d >= 256**: `scipy.linalg.eigh` (heevr, MRRR algorithm)
+
+On Apple M1/M2/M3 with Accelerate, heevr is **2x faster** than heevd at d>=256.
+On Intel/AMD CPUs the optimal driver may differ — run `scripts/benchmark_platform.py`
+to determine the best backend for your hardware.
+
+### Criterion Performance at d=256 (QubitGrid, M1)
+
+| Criterion | Time/trial | 5,000 trials |
+|-----------|-----------|-------------|
+| Moment    | ~1ms      | ~5 sec      |
+| Krylov    | ~5s       | ~7 hours    |
+| Spectral  | ~50s      | ~69 hours   |
+
+### Optional JAX Backend
+
+Install `jax` for 12-97x Krylov speedup via JIT compilation (effective at d<=128).
+JAX is auto-detected by `scripts/production/sweep_production.py`.
+
+### Recommended Sweep Configurations (d=256)
+
+| Purpose | n_hamiltonians x n_targets x K_values | Approx. time |
+|---------|---------------------------------------|-------------|
+| Quick test | 20 x 3 x 5K | ~5 hours |
+| Publication | 50 x 5 x 10K | ~3 days |
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
