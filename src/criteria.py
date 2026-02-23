@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from scipy.optimize import minimize
-from scipy.sparse import issparse, csr_matrix, coo_matrix
+from scipy.sparse import issparse, coo_matrix
 
 from .math_utils import (
     KRYLOV_BREAKDOWN_TOL,
@@ -116,7 +116,10 @@ class ReachabilityCriterion(ABC):
         self.tau = tau
         self._hams_array_cache = None  # Lazy; built on first access
         self._use_sparse = self.hams_sparse is not None
-        # Pre-extract COO data for fast H(lambda) assembly (9x vs CSR loop)
+        # Hamiltonian construction method selection:
+        # - Sparse (QubitGrid): COO assembly is 5-12x faster than CSR loop.
+        #   Pre-extracts COO data at init, scales via np.repeat in _construct_H.
+        # - Dense (Canonical): np.tensordot is optimal for dense operators.
         if self._use_sparse:
             rows_l, cols_l, data_l, nnz_l = [], [], [], []
             for op in self.hams_sparse:

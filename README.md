@@ -90,31 +90,41 @@ python scripts/tests/run_all_tests.py         # Full suite (34 tests)
 python scripts/tests/run_all_tests.py --quick  # Quick mode (~1s)
 ```
 
-## Performance
+## Algorithm Selection
 
-### Eigendecomposition Backend
+The code automatically selects optimal algorithms based on problem size.
 
-The Spectral criterion's bottleneck is eigendecomposition (97-99% of runtime at d>=64).
-The `eigendecompose()` function auto-selects the fastest LAPACK driver by dimension:
+### Eigendecomposition
 
-- **d < 256**: `numpy.linalg.eigh` (heevd, divide & conquer)
-- **d >= 256**: `scipy.linalg.eigh` (heevr, MRRR algorithm)
+| Dimension | Backend | LAPACK Driver | Rationale |
+|-----------|---------|---------------|-----------|
+| d < 256 | `numpy.linalg.eigh` | heevd (divide & conquer) | Lower overhead for small matrices |
+| d >= 256 | `scipy.linalg.eigh` | heevr (MRRR) | 1.3-2x faster on Apple M1 Accelerate |
 
-On Apple M1/M2/M3 with Accelerate, heevr is **2x faster** than heevd at d>=256.
+Threshold: `SCIPY_EIGH_THRESHOLD = 256` in `src/math_utils.py`.
 On Intel/AMD CPUs the optimal driver may differ — run `scripts/benchmark_platform.py`
 to determine the best backend for your hardware.
 
-### Criterion Performance at d=256 (QubitGrid, M1)
+### Hamiltonian Construction
 
-| Criterion | Time/trial | 5,000 trials |
-|-----------|-----------|-------------|
-| Moment    | ~1ms      | ~5 sec      |
-| Krylov    | ~5s       | ~7 hours    |
-| Spectral  | ~50s      | ~69 hours   |
+| Sparsity | Method | Speedup |
+|----------|--------|---------|
+| Sparse (QubitGrid) | COO assembly with vectorized scaling | 5-12x vs CSR loop |
+| Dense (Canonical) | `np.tensordot` | N/A |
+
+Dispatched automatically by `_construct_H()` in `src/criteria.py`.
+
+### Optimizer
+
+All optimization-based criteria (Spectral, Krylov) use L-BFGS-B:
+- Bounded optimization (lambda in [-1, 1]^K)
+- Combined objective+gradient via `jac=True` (avoids duplicate eigendecomposition)
+- Multi-restart with early termination when score >= tau
+- Default: `maxiter=200`, `restarts=2`, `ftol=1e-6`
 
 ### Optional JAX Backend
 
-Install `jax` for Krylov speedup via JIT compilation:
+Install `jax` for Krylov speedup at small dimensions via JIT compilation:
 
 ```bash
 pip install jax jaxlib
@@ -122,18 +132,32 @@ pip install jax jaxlib
 
 | Criterion | d <= 128 | d >= 256 |
 |-----------|----------|---------|
-| Krylov | JAX JIT: 12-97x faster | NumPy (autodiff unstable) |
+| Krylov | **JAX JIT: 12-97x faster** | NumPy (autodiff unstable) |
 | Spectral | NumPy (scipy eigh optimal) | NumPy |
 | Moment | NumPy | NumPy |
 
 JAX is auto-detected by `scripts/production/sweep_production.py`.
 
+## Performance
+
+### Criterion Timing at d=256 (QubitGrid, Apple M1, maxiter=50, restarts=1)
+
+| Criterion | Time/trial | Publication sweep (2,500 trials) |
+|-----------|-----------|----------------------------------|
+| Moment | ~1.5ms | ~4 sec |
+| Krylov | ~8.5s | ~5.9 hours |
+| Spectral | ~7.6s | ~5.3 hours |
+| **Total** | | **~11.2 hours** |
+
 ### Recommended Sweep Configurations (d=256)
 
-| Purpose | n_hamiltonians x n_targets x K_values | Approx. time |
-|---------|---------------------------------------|-------------|
-| Quick test | 20 x 3 x 5K | ~5 hours |
-| Publication | 50 x 5 x 10K | ~3 days |
+| Purpose | Trials | Approx. time |
+|---------|--------|-------------|
+| Quick test (20h x 3t x 5K) | 300 | ~1.3 hours |
+| Publication (50h x 5t x 10K) | 2,500 | ~11.2 hours |
+| Full (100h x 10t x 10K) | 10,000 | ~44.8 hours |
+
+Use `scripts/estimate_sweep_time.py` to project times for your hardware.
 
 ## License
 

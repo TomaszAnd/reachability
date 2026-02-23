@@ -15,7 +15,8 @@ Requires: jax, jaxlib
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Tuple, Union
+
+
 
 import numpy as np
 
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 try:
     import jax
     import jax.numpy as jnp
-    from jax import jit, grad, vmap
+    from jax import jit, grad
     JAX_AVAILABLE = True
 except ImportError:
     JAX_AVAILABLE = False
