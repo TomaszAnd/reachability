@@ -24,6 +24,55 @@ from .criteria import (
 from .math_utils import compute_binomial_sem
 
 
+def adaptive_K_values(
+    d: int,
+    rho_c: float = 0.15,
+    rho_min: float = 0.02,
+    rho_max: float = 0.40,
+    n_total: int = 15,
+    K_max: Optional[int] = None,
+) -> List[int]:
+    """Generate K values with denser sampling near the phase transition rho_c.
+
+    Places ~half the points in [rho_c - 2*delta, rho_c + 2*delta] and the rest
+    spread across the tails, where delta = (rho_max - rho_min) / n_total.
+
+    Args:
+        d: Hilbert space dimension.
+        rho_c: Estimated critical density for the phase transition.
+        rho_min: Minimum rho value.
+        rho_max: Maximum rho value.
+        n_total: Total number of K values to generate.
+        K_max: Maximum allowed K (default: d^2 - 1).
+
+    Returns:
+        Sorted list of unique K values (integers >= 2).
+    """
+    if K_max is None:
+        K_max = d * d - 1
+
+    # Half the points in the dense region near rho_c
+    n_dense = n_total // 2
+    n_sparse = n_total - n_dense
+
+    delta = (rho_max - rho_min) / n_total
+    rho_lo = max(rho_min, rho_c - 2 * delta)
+    rho_hi = min(rho_max, rho_c + 2 * delta)
+
+    # Dense region: uniform in [rho_lo, rho_hi]
+    rho_dense = np.linspace(rho_lo, rho_hi, n_dense)
+
+    # Sparse region: spread across tails
+    rho_left = np.linspace(rho_min, rho_lo, n_sparse // 2 + 1)[:-1]
+    rho_right = np.linspace(rho_hi, rho_max, n_sparse - n_sparse // 2 + 1)[1:]
+    rho_sparse = np.concatenate([rho_left, rho_right])
+
+    rho_all = np.concatenate([rho_dense, rho_sparse])
+    K_values = sorted(set(max(2, int(rho * d**2)) for rho in rho_all))
+    K_values = [k for k in K_values if k <= K_max]
+    return K_values
+
+
 @dataclass
 class SweepConfig:
     """Configuration for a density sweep experiment."""
