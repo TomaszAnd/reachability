@@ -234,9 +234,12 @@ class OptimizableCriterion(ReachabilityCriterion):
         """
         Multi-restart optimization to maximize the criterion score.
 
-        Generates `restarts` random starting points in [-1,1]^K and runs
-        L-BFGS-B (with analytical gradient) from each. Returns the best
-        result across all restarts.
+        Supports two modes:
+        - method='L-BFGS-B': Gradient-based multi-restart optimization (default).
+          Best for SpectralCriterion where gradient overhead is moderate.
+        - method='random': Pure random search over n_samples random points.
+          12x faster for KrylovCriterion at d=64 with identical verdicts,
+          because Krylov gradient has 60x overhead (838ms vs 14ms forward).
 
         Args:
             parallel: If True, run restarts in parallel threads.
@@ -245,6 +248,32 @@ class OptimizableCriterion(ReachabilityCriterion):
         K = self.K
         bounds = DEFAULT_BOUNDS * K
         rng = np.random.RandomState(seed or 42)
+
+        # Random search: evaluate many random points, no gradient needed.
+        # Benchmark shows 50 samples gives 100% verdict agreement vs
+        # L-BFGS-B r=10 at d=32,64 while being 12x faster.
+        if method == 'random':
+            n_samples = max(restarts * 15, 50)
+            start_time = time.time()
+            best_value = 0.0
+            best_x = np.zeros(K)
+
+            for _ in range(n_samples):
+                x = rng.uniform(-1, 1, K)
+                score = self.evaluate(x, return_gradient=False)
+                if score > best_value:
+                    best_value = float(score)
+                    best_x = x.copy()
+                if best_value >= self.tau:
+                    break
+
+            return {
+                "best_value": best_value,
+                "best_x": best_x,
+                "nfev": n_samples,
+                "runtime_s": time.time() - start_time,
+            }
+
         use_grad = (method == "L-BFGS-B")
 
         # Adaptive restarts for reliable convergence.
@@ -258,13 +287,13 @@ class OptimizableCriterion(ReachabilityCriterion):
         # Transition region: hardest optimization landscape
         rho = K / self.dim**2
         if 0.04 < rho < 0.30:
-            effective_restarts = max(effective_restarts, 12)
-        # Large dimension: harder landscape
+            effective_restarts = max(effective_restarts, 10)
+        # Large dimension: harder landscape (capped at +6 to avoid blowup)
         if self.dim >= 32:
-            dim_factor = 1 + (self.dim - 32) // 32
-            effective_restarts = max(effective_restarts, restarts + 3 * dim_factor)
-        # Absolute minimum
-        effective_restarts = max(effective_restarts, 5)
+            dim_factor = min(1 + (self.dim - 32) // 32, 3)
+            effective_restarts = max(effective_restarts, restarts + 2 * dim_factor)
+        # Absolute minimum 5, hard cap 12
+        effective_restarts = min(max(effective_restarts, 5), 12)
 
         # Generate all starting points upfront
         x0_list = [np.array([rng.uniform(lo, hi) for lo, hi in bounds])

@@ -4,8 +4,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-OUTPUT_DIR = Path("data/overnight_v87")
-FIG_DIR = Path("fig/overnight_v87")
+OUTPUT_DIR = Path("data/overnight_v89")
+FIG_DIR = Path("fig/overnight_v89")
 
 
 def check_progress():
