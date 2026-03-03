@@ -219,7 +219,7 @@ class OptimizableCriterion(ReachabilityCriterion):
                                   bounds=bounds, options=options)
             return -result.fun, result.x.copy(), result.nfev
         except Exception as e:
-            logger.debug(f"Optimization restart failed: {e}")
+            logger.warning(f"Optimization restart failed: {e}")
             return 0.0, x0, 0
 
     def _maximize(
@@ -404,9 +404,9 @@ class SpectralCriterion(OptimizableCriterion):
             6. (If gradient) Perturbation theory for dS/dlambda_k
         """
         # Step 1: Build combined Hamiltonian
+        # eigendecompose() requires dense input (no sparse eigh in numpy/scipy)
         if self._use_sparse:
-            H_sp = self._construct_H(lambdas)
-            H = H_sp.toarray() if issparse(H_sp) else H_sp
+            H = self._construct_H(lambdas).toarray()
         else:
             H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
 
@@ -441,6 +441,8 @@ class SpectralCriterion(OptimizableCriterion):
         # Regularized inverse energy differences for degenerate eigenvalues
         E = eigenvalues
         delta_E = E[:, None] - E[None, :]
+        # Regularization for degenerate eigenvalues: the Spectral gradient
+        # is approximate when eigenvalues coincide (perturbation theory diverges).
         eps_reg = 1e-12
         inv_delta_E = delta_E / (delta_E**2 + eps_reg)
 
