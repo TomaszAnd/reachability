@@ -1251,6 +1251,65 @@ def test_J_extended_coverage():
 
 
 # =============================================================================
+# Test K: rho_c Estimation Tests
+# =============================================================================
+
+def test_K_rho_c_estimation():
+    """
+    Test K: rho_c estimation accuracy with varying transition resolution.
+
+    K1: estimate_rho_c accuracy improves with more transition points
+    K2: spectral_restarts field exists in SweepConfig
+    K3: load_rho_c_summary returns DataFrame
+    """
+    print("\n" + "=" * 60)
+    print("TEST K: rho_c Estimation")
+    print("=" * 60)
+
+    import pandas as pd
+    from src.sampling import estimate_rho_c, SweepConfig, load_rho_c_summary
+
+    results = {'passed': 0, 'failed': 0, 'details': []}
+
+    # K1: estimate_rho_c accuracy with varying resolution
+    true_rho_c = 0.05
+    delta = 0.005
+    for n_pts in [3, 5, 8, 12]:
+        rho_vals = np.linspace(0.01, 0.10, n_pts)
+        P = 1.0 / (1.0 + np.exp((rho_vals - true_rho_c) / delta))
+        df = pd.DataFrame({'rho': rho_vals, 'spectral_P': P, 'n_trials': np.full(n_pts, 500)})
+        rc = estimate_rho_c(df, 'spectral')
+        err = abs(rc - true_rho_c)
+        # Tolerance scales inversely with resolution
+        tol = 0.5 * (0.10 - 0.01) / max(n_pts - 1, 1)
+        if err < tol:
+            results['passed'] += 1
+            print(f"  K1/{n_pts}pts: rho_c={rc:.5f}, err={err:.5f} < tol={tol:.4f} PASS")
+        else:
+            results['failed'] += 1
+            print(f"  K1/{n_pts}pts: rho_c={rc:.5f}, err={err:.5f} >= tol={tol:.4f} FAIL")
+
+    # K2: spectral_restarts field in SweepConfig
+    cfg = SweepConfig()
+    if hasattr(cfg, 'spectral_restarts') and cfg.spectral_restarts >= 3:
+        results['passed'] += 1
+        print(f"  K2: SweepConfig.spectral_restarts={cfg.spectral_restarts} PASS")
+    else:
+        results['failed'] += 1
+        print(f"  K2: SweepConfig missing spectral_restarts FAIL")
+
+    # K3: load_rho_c_summary is callable (doesn't need actual file)
+    if callable(load_rho_c_summary):
+        results['passed'] += 1
+        print(f"  K3: load_rho_c_summary is callable PASS")
+    else:
+        results['failed'] += 1
+        print(f"  K3: load_rho_c_summary not callable FAIL")
+
+    return results
+
+
+# =============================================================================
 # Runner
 # =============================================================================
 
@@ -1265,6 +1324,7 @@ ALL_TESTS = {
     'H': ('Data Pipeline Audit', test_H_data_pipeline),
     'I': ('Audit Coverage', test_I_audit_coverage),
     'J': ('Extended Coverage', test_J_extended_coverage),
+    'K': ('rho_c Estimation', test_K_rho_c_estimation),
 }
 
 

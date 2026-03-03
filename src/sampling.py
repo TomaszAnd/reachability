@@ -593,3 +593,8 @@ def bootstrap_rho_c(
     lo = np.percentile(samples, 2.5)
     hi = np.percentile(samples, 97.5)
     return (median, lo, hi)
+
+
+def load_rho_c_summary(path: str = 'data/overnight_v96/rho_c_summary.csv') -> pd.DataFrame:
+    """Load rho_c summary from a sweep run. Returns DataFrame."""
+    return pd.read_csv(path)

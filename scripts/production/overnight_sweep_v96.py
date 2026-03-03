@@ -437,10 +437,11 @@ def main():
     plot_rho_c_vs_inv_d(all_results, FIG_DIR / 'rho_c_vs_inv_d.png', use_latex)
     print("Saved: rho_c_vs_inv_d.png")
 
-    # Phase transition summary
+    # Phase transition summary and rho_c data export
     print("\n" + "=" * 60)
     print("PHASE TRANSITIONS (rho_c with 95% CI)")
     print("=" * 60)
+    rho_c_rows = []
     for model_name in ['canonical', 'qubitgrid']:
         if not all_results.get(model_name):
             continue
@@ -450,8 +451,17 @@ def main():
             parts = []
             for crit in _get_criteria(d):
                 rc = estimate_rho_c(df, crit)
+                med, lo, hi = bootstrap_rho_c(df, crit)
+                n_K = len(df)
+                col_P = f'{crit}_P'
+                n_trans = int(((df[col_P] > 0.1) & (df[col_P] < 0.9)).sum()) if col_P in df.columns else 0
+                rho_c_rows.append({
+                    'model': model_name, 'd': d, 'criterion': crit,
+                    'rho_c': rc,
+                    'rho_c_median': med, 'rho_c_lo': lo, 'rho_c_hi': hi,
+                    'n_K_values': n_K, 'n_transitions': n_trans,
+                })
                 if np.isfinite(rc):
-                    med, lo, hi = bootstrap_rho_c(df, crit)
                     if np.isfinite(med):
                         parts.append(f"{crit}={rc:.4f} [{lo:.4f}, {hi:.4f}]")
                     else:
@@ -459,6 +469,17 @@ def main():
                 else:
                     parts.append(f"{crit}=--")
             print(f"  d={d:3d}: {', '.join(parts)}")
+
+    # Save rho_c summary as CSV and JSON
+    if rho_c_rows:
+        import json
+        df_rc = pd.DataFrame(rho_c_rows)
+        df_rc.to_csv(OUTPUT_DIR / 'rho_c_summary.csv', index=False)
+        # JSON with NaN -> null conversion
+        rc_json = df_rc.where(df_rc.notna(), None).to_dict(orient='records')
+        with open(OUTPUT_DIR / 'rho_c_summary.json', 'w') as f:
+            json.dump(rc_json, f, indent=2, default=str)
+        print(f"\nSaved: rho_c_summary.csv and rho_c_summary.json ({len(rho_c_rows)} entries)")
 
     total_h = (datetime.now() - start).total_seconds() / 3600
     print(f"\nTotal runtime: {total_h:.2f} hours")
