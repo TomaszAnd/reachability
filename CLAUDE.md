@@ -5,10 +5,10 @@
 Quantum reachability analysis: testing whether target quantum states are reachable
 under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 
-## Current State (v0.4.2)
+## Current State (v0.4.3)
 
 - Branch: `fast` (pushed to GitHub)
-- All 44 tests passing (34 original + 10 audit coverage)
+- All 58 tests passing (34 original + 10 audit + 8 extended + 6 rho_c)
 - Class-based API, pure numpy (no qutip dependency)
 - Optional JAX backend for GPU acceleration
 
@@ -27,6 +27,12 @@ under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 - Publication-quality plotting with Fermi-Dirac fits
 - Two Hamiltonian families: CanonicalQudit and QubitGrid
 - Comprehensive Krylov analysis notebook explaining QubitGrid P=0
+- **Separate `spectral_restarts`** field in SweepConfig (5-10, vs Krylov's 3)
+- **Eigendecomposition caching** in SpectralCriterion (avoids redundant eigh during line search)
+- **Sparse Krylov gradient** — keeps H sparse throughout gradient loop
+- **Chunked Spectral gradient** — processes in batches of 64 to limit memory
+- **QubitGrid d=256** in v96 sweep (Moment+Krylov only, Spectral infeasible)
+- **rho_c summary export** — CSV/JSON from v96 sweep, `load_rho_c_summary()` helper
 
 ### Key Findings
 1. **Spectral/Krylov**: Show Fermi-Dirac phase transitions P(ρ) = 1/(1+exp((ρ-ρc)/Δ))
@@ -69,7 +75,7 @@ under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 ## Running Tests
 
 ```bash
-python scripts/tests/run_all_tests.py         # Full (44 tests)
+python scripts/tests/run_all_tests.py         # Full (58 tests)
 python scripts/tests/run_all_tests.py --quick  # Quick (~3s)
 ```
 
@@ -111,7 +117,7 @@ scripts/
 │   ├── sweep_production.py      # Production sweep (auto JAX/NumPy selection)
 │   └── plot_overnight_v7style.py # Publication figure generation
 └── tests/
-    ├── run_all_tests.py            # 44 tests in 9 groups (A-I)
+    ├── run_all_tests.py            # 58 tests in 11 groups (A-K)
     └── confusion_matrix_benchmark.py
 
 notebooks/
@@ -163,8 +169,10 @@ since eigendecomposition is already BLAS-optimized.
 ### d=256 Feasibility
 
 - **Canonical d=256**: K=d²=65536 operators, requires >64GB RAM — infeasible on 16GB
-- **QubitGrid d=256 Krylov**: ~5s/trial, sweep (100×10, 10K) ≈ 72 min
-- **QubitGrid d=256 Spectral**: ~50s/trial, sweep (50×5, 10K) ≈ 2-3 days
+- **QubitGrid d=256 Krylov random**: ~11ms/trial — very fast, included in v96 sweep
+- **QubitGrid d=256 Spectral**: ~41s/trial (is_reachable, r=10) — infeasible for overnight
+- **QubitGrid d=256 Moment**: ~0.7ms/trial — very fast
+- **v96 sweep strategy**: d≥256 uses Moment+Krylov only (Spectral skipped)
 - **JAX at d=256**: SLOWER than NumPy (autodiff through 255 Lanczos steps unstable)
 - **Strategy**: JAX for d≤128, NumPy for d≥256
 
@@ -224,21 +232,23 @@ python scripts/benchmark_scaling.py              # Scaling analysis
 python scripts/benchmark_platform.py             # Platform-specific eigh
 python scripts/estimate_sweep_time.py            # Sweep time projection
 ```
-## Recent Changes (v0.4.2)
+## Recent Changes (v0.4.3)
 
-1. **CRITICAL BUG FIX**: Fixed `nwhatsp.linalg.qr` typo in `_lanczos_basis()` (criteria.py line 550). All Krylov forward-only evaluations were crashing.
-2. **_lanczos_basis refactored**: Now accepts `apply_qr: bool = True` parameter. QR re-orthogonalization documented with measured error bounds.
-3. **Spectral sparse conversion simplified**: Direct `.toarray()` call instead of two-step sparse->CSR->dense.
-4. **Optimization logging improved**: `_single_restart` exception handler changed from `logger.debug` to `logger.warning`.
-5. **QubitGrid lattice edges cached**: `_build_lattice_edges()` called once instead of twice in `_build_basis_sparse()`.
-6. **Color scheme unified**: CRIT_COLORS updated to moment=green, spectral=blue, krylov=orange across all files.
-7. **AdaptiveSweepConfig.min_hamiltonians**: Default reduced from 20 to 10.
-8. **New functions**: `estimate_rho_c()` and `bootstrap_rho_c()` added to `src/sampling.py`.
-9. **New plotting constants**: `CRIT_LABELS` dict added to `src/plotting.py`.
-10. **criteria_jax.py documented**: Comments on QR omission, breakdown tolerance, and JIT recompilation.
-11. **10 new tests** (Test I): Krylov forward, random search, QR agreement, gradient FD, Moment non-monotonicity, sparse/dense agreement, rho_c interpolation, bootstrap CI, AdaptiveSweep SEM.
-12. **d=256 timing profile**: `scripts/profile_d256.py` with measured timings and extrapolations.
-13. **v96 sweep script**: Two-pass K selection, publication-quality plots (REVTeX4-2), bootstrap CIs, power-law fits.
+1. **`spectral_restarts` field**: Added to `SweepConfig` and `AdaptiveSweepConfig`. Spectral L-BFGS-B needs 5-10 restarts (vs Krylov random search's 3) to avoid false UNREACHABLE verdicts. Dimension-adaptive: 5 for d≤32, 10 for d≥64.
+2. **rho_c summary export**: v96 sweep saves `rho_c_summary.csv` and `rho_c_summary.json`. New `load_rho_c_summary()` helper in sampling.py.
+3. **Eigendecomposition caching**: `SpectralCriterion._cached_eigendecompose()` keyed on `lambdas.tobytes()`. Avoids redundant eigh during L-BFGS-B line search (same lambdas → same H → same eigh).
+4. **Sparse Krylov gradient**: Keeps H sparse throughout gradient loop instead of densifying via `.toarray()`. Sparse matvec for both forward (`H @ v_j`) and gradient (`H @ dV_curr.T`).
+5. **Chunked Spectral gradient**: Processes gradient in batches of 64 operators. Limits peak memory from O(K·d²) to O(64·d²) for large K.
+6. **QubitGrid d=256 in v96 sweep**: Moment+Krylov only (Spectral infeasible at 41s/trial). Krylov random: 11ms, Moment: 0.7ms. `--no-256` flag to skip.
+7. **14 new tests** (Tests J+K): Extended coverage (8 tests) + rho_c estimation (6 tests). Total: 58 tests in 11 groups (A-K).
+
+### Previous Changes (v0.4.2)
+
+1. **CRITICAL BUG FIX**: Fixed `nwhatsp.linalg.qr` typo in `_lanczos_basis()`. All Krylov forward-only evaluations were crashing.
+2. **_lanczos_basis refactored**: Now accepts `apply_qr: bool = True` parameter.
+3. **10 new tests** (Test I): Audit coverage tests.
+4. **v96 sweep script**: Two-pass K selection, publication-quality plots, bootstrap CIs, power-law fits.
+5. **New functions**: `estimate_rho_c()` and `bootstrap_rho_c()` in sampling.py.
 
 ## Audit Findings (v0.4.2)
 
@@ -263,3 +273,6 @@ Benchmarked at d=16,32 transition regions: Random-50 gives 100% verdict agreemen
 - AdaptiveSweepConfig.min_hamiltonians = 10 (reduced from 20)
 - Two-pass K selection: coarse scan → dense around ρ_c
 - Bootstrap ρ_c confidence intervals
+- `spectral_restarts`: coarse pass=3, main pass=5 (d≤32) or 10 (d≥64)
+- QubitGrid d=256: Moment+Krylov only (`--no-256` to skip)
+- Outputs: per-dimension CSVs + `rho_c_summary.csv` + `rho_c_summary.json`
