@@ -208,6 +208,10 @@ class CanonicalQuditModel(QuantumModel):
     - Y_jk = -i(|j><k| - |k><j|) for j < k
     - Z_j = |j><j| - |j+1><j+1| for j < d-1
     - I = identity (optional)
+
+    Memory warning: At d=256, the full basis contains d^2=65536 dense
+    (256x256) complex128 matrices, requiring ~68GB RAM. This is infeasible
+    on machines with <=16GB. Use QubitGridModel for d>=256 experiments.
     """
 
     def __init__(self, dim: int, include_identity: bool = True,
@@ -363,19 +367,21 @@ class QubitGridModel(QuantumModel):
                     op = spkron(op, p, format='csr')
             return op
 
+        # Cache edges to avoid redundant computation
+        edges = self._build_lattice_edges()
+
         # 1-local terms
         for site in range(self.n_sites):
             for pauli in paulis:
                 basis.append(_build_operator({site: pauli}))
 
         # 2-local terms
-        for site_i, site_j in self._build_lattice_edges():
+        for site_i, site_j in edges:
             for pauli_i in paulis:
                 for pauli_j in paulis:
                     basis.append(_build_operator({site_i: pauli_i, site_j: pauli_j}))
 
         # Validate
-        edges = self._build_lattice_edges()
         expected_L = 3 * self.n_sites + 9 * len(edges)
         assert len(basis) == expected_L, (
             f"Operator count mismatch: got {len(basis)}, expected {expected_L}")
