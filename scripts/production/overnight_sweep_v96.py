@@ -128,8 +128,15 @@ def two_pass_K_values(model, model_name, d, config):
     return K_all
 
 
-def _get_criteria(d):
-    """Krylov skipped at d>=128."""
+def _get_criteria(d, model_name=None):
+    """Select criteria based on dimension and model.
+
+    - Krylov skipped at d>=128 for Canonical (too slow with dense ops)
+    - Spectral skipped at d>=256 (41s/trial, infeasible for overnight)
+    - QubitGrid d=256 runs Moment+Krylov only (~11ms/trial Krylov)
+    """
+    if d >= 256:
+        return ['moment', 'krylov']
     if d >= 128:
         return ['moment', 'spectral']
     return ['moment', 'spectral', 'krylov']
@@ -341,8 +348,11 @@ def main():
     args = parser.parse_args()
 
     dims = [16] if args.quick else args.dims
+    # QubitGrid includes d=256 by default (Moment+Krylov only, ~1h)
     if args.no_256:
-        dims = [d for d in dims if d != 256]
+        qubitgrid_dims = [d for d in dims if d != 256]
+    else:
+        qubitgrid_dims = sorted(set(dims) | {256})
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     FIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -353,7 +363,7 @@ def main():
         print(f"  d=32:   ~30 min (both models)")
         print(f"  d=64:   ~5 hours (both models)")
         print(f"  d=128:  ~17 hours (Spectral+Moment only)")
-        print(f"  d=256:  QubitGrid only, ~3 hours (Spectral+Moment)")
+        print(f"  d=256:  QubitGrid only, ~1 hour (Moment+Krylov, Spectral infeasible)")
         return
 
     use_latex = _setup_latex()
@@ -364,7 +374,8 @@ def main():
 
     start = datetime.now()
     print(f"Starting v96 sweep at {start}")
-    print(f"Dimensions: {dims}")
+    print(f"Canonical dims: {dims}")
+    print(f"QubitGrid dims: {qubitgrid_dims}")
     print(f"Two-pass K selection, AdaptiveSweep, target_sem=0.02")
     print("=" * 60)
 
@@ -402,7 +413,7 @@ def main():
         print("\n" + "=" * 60)
         print("QUBITGRID MODEL")
         print("=" * 60)
-        for d in dims:
+        for d in qubitgrid_dims:
             if d not in LATTICE_CONFIGS:
                 print(f"\n--- QubitGrid d={d}: No lattice config, skipping ---")
                 continue
