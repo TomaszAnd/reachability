@@ -164,6 +164,10 @@ class ReachabilityCriterion(ABC):
     def clear_cache(self) -> None:
         """Clear cached arrays to free memory."""
         self._hams_array_cache = None
+        # Also clear subclass caches if present
+        if hasattr(self, '_eigh_cache'):
+            self._eigh_cache = None
+            self._eigh_cache_key = None
 
     @abstractmethod
     def evaluate(
@@ -389,6 +393,21 @@ class SpectralCriterion(OptimizableCriterion):
     - UNREACHABLE if max_lambda S(lambda) < tau
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._eigh_cache_key = None
+        self._eigh_cache = None
+
+    def _cached_eigendecompose(self, H, lambdas):
+        """Cache eigendecomposition when lambdas haven't changed."""
+        key = lambdas.tobytes()
+        if key == self._eigh_cache_key and self._eigh_cache is not None:
+            return self._eigh_cache
+        eigenvalues, eigenvectors = eigendecompose(H)
+        self._eigh_cache_key = key
+        self._eigh_cache = (eigenvalues, eigenvectors)
+        return eigenvalues, eigenvectors
+
     def evaluate(
         self, lambdas: np.ndarray, return_gradient: bool = False
     ) -> Union[float, Tuple[float, np.ndarray]]:
@@ -410,9 +429,9 @@ class SpectralCriterion(OptimizableCriterion):
         else:
             H = np.tensordot(lambdas, self._hams_array, axes=(0, 0))
 
-        # Step 2: Eigendecomposition
+        # Step 2: Eigendecomposition (cached to avoid redundant work during line search)
         try:
-            eigenvalues, eigenvectors = eigendecompose(H)
+            eigenvalues, eigenvectors = self._cached_eigendecompose(H, lambdas)
         except RuntimeError:
             if return_gradient:
                 return 0.0, np.zeros(self.K)
