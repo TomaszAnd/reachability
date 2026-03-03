@@ -56,6 +56,7 @@ if JAX_AVAILABLE:
 
     from functools import partial
 
+    # Different values of m trigger JIT recompilation since m is a static arg.
     @partial(jax.jit, static_argnums=(4,))
     def _krylov_score_jax(lambdas, hams_array, phi, psi, m):
         """JIT-compiled Krylov score with masked breakdown handling.
@@ -88,6 +89,8 @@ if JAX_AVAILABLE:
             # Safe norm: epsilon inside sqrt prevents NaN gradient
             beta_sq = jnp.real(jnp.vdot(w, w))
             beta = jnp.sqrt(beta_sq + 1e-300)
+            # Breakdown check: 1e-28 == KRYLOV_BREAKDOWN_TOL**2 (comparing
+            # beta² not beta, to avoid the sqrt for the comparison).
             is_valid = beta_sq > 1e-28
 
             v_next = (w / beta) * jnp.where(is_valid & (is_prev_valid > 0.5), 1.0, 0.0)
@@ -104,8 +107,10 @@ if JAX_AVAILABLE:
             jnp.arange(m - 1),
         )
 
-        # Project psi onto Krylov basis (no QR — matches NumPy gradient path)
-        # QR is not used because autodiff through QR fails with zero columns
+        # No QR re-orthogonalization: consistent with the gradient path in
+        # criteria.py. QR is intentionally omitted for JAX autodiff compatibility
+        # (QR has discontinuous gradients at rank-deficient points, and JAX
+        # cannot differentiate through the zero-column masking).
         c = V.conj().T @ psi  # (m,)
         c_masked = c * valid_mask
         R = jnp.real(jnp.vdot(c_masked, c_masked))
