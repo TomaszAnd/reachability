@@ -610,8 +610,9 @@ class KrylovCriterion(OptimizableCriterion):
             return np.clip(R, 0.0, 1.0)
 
         # Step 5: Lanczos iteration with gradient differentiation
-        # Uses dense H for batch dV matmul (H(lambda) is too dense for sparse)
-        H_dense = H.toarray() if issparse(H) else H
+        # Keep H sparse for matvec when available (avoids O(d^2) densification)
+        H_is_sparse = issparse(H)
+        H_dense = None if H_is_sparse else H
 
         d = self.dim
         m = min(self.m, d)
@@ -648,7 +649,7 @@ class KrylovCriterion(OptimizableCriterion):
             dc_j = dV_curr.conj() @ psi  # (K,)
             dc_accum += c_vec[j].conj() * dc_j
 
-            w = H_dense @ v_j
+            w = H_dense @ v_j if not H_is_sparse else np.asarray(H @ v_j).ravel()
 
             # dw[k] = H_k @ v_j + H @ dV_curr[k]
             if self._use_sparse:
@@ -656,7 +657,12 @@ class KrylovCriterion(OptimizableCriterion):
                 for k in range(self.K):
                     r = self.hams_sparse[k] @ v_j
                     hk_vj[k] = np.asarray(r).ravel()
-                dw = hk_vj + (H_dense @ dV_curr.T).T
+                # Use sparse H @ dV_curr.T to avoid densifying H entirely
+                if H_is_sparse:
+                    Hdv = np.asarray(H @ dV_curr.T)  # (d, K) sparse matvec
+                    dw = hk_vj + Hdv.T
+                else:
+                    dw = hk_vj + (H_dense @ dV_curr.T).T
             else:
                 dw = self._hams_array @ v_j + (H_dense @ dV_curr.T).T
 
