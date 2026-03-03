@@ -34,15 +34,21 @@ DIM_MARKERS = {
 }
 
 CRIT_COLORS = {
-    'moment': '#1f77b4',    # Blue
-    'spectral': '#d62728',  # Red
-    'krylov': '#2ca02c',    # Green
+    'moment': '#2ca02c',    # Green
+    'spectral': '#1f77b4',  # Blue
+    'krylov': '#ff7f0e',    # Orange
 }
 
 CRIT_MARKERS = {
     'moment': 'o',
     'spectral': 's',
     'krylov': '^',
+}
+
+CRIT_LABELS = {
+    'moment': 'Moment',
+    'spectral': 'Spectral',
+    'krylov': 'Krylov',
 }
 
 

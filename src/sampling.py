@@ -382,7 +382,7 @@ class AdaptiveSweepConfig(SweepConfig):
     stops early when statistical confidence is achieved or when P is
     clearly near 0 or 1.
     """
-    min_hamiltonians: int = 20
+    min_hamiltonians: int = 10
     max_hamiltonians: int = 150
     target_sem: float = 0.02
     batch_size: int = 10
@@ -499,3 +499,90 @@ class AdaptiveSweep(DensitySweep):
                 break
 
         return pd.DataFrame(self._results)
+
+
+def estimate_rho_c(df: pd.DataFrame, criterion: str) -> float:
+    """Estimate rho_c via linear interpolation at P=0.5.
+
+    Args:
+        df: DataFrame with 'rho' column and '{criterion}_P' column.
+        criterion: Criterion name ('moment', 'spectral', 'krylov').
+
+    Returns:
+        Estimated rho_c, or NaN if P=0.5 crossing not found.
+    """
+    col = f'{criterion}_P'
+    if col not in df.columns:
+        return np.nan
+
+    P = df[col].values
+    rho = df['rho'].values
+
+    if P.max() < 0.5 or P.min() > 0.5:
+        return np.nan
+
+    for i in range(len(P) - 1):
+        if P[i] >= 0.5 >= P[i + 1] and P[i] != P[i + 1]:
+            frac = (P[i] - 0.5) / (P[i] - P[i + 1])
+            return rho[i] + frac * (rho[i + 1] - rho[i])
+
+    return np.nan
+
+
+def bootstrap_rho_c(
+    df: pd.DataFrame,
+    criterion: str,
+    n_boot: int = 1000,
+    seed: int = 42,
+) -> tuple:
+    """Bootstrap 95% CI for rho_c using binomial resampling.
+
+    For each bootstrap iteration, resample the P values at each rho
+    using a binomial distribution with the observed P and n_trials,
+    then estimate rho_c via linear interpolation at P=0.5.
+
+    Args:
+        df: DataFrame with 'rho', '{criterion}_P', 'n_trials' columns.
+        criterion: Criterion name ('moment', 'spectral', 'krylov').
+        n_boot: Number of bootstrap iterations.
+        seed: Random seed.
+
+    Returns:
+        (median, lo, hi) tuple for the 95% CI on rho_c.
+        Returns (NaN, NaN, NaN) if estimation fails.
+    """
+    col = f'{criterion}_P'
+    if col not in df.columns:
+        return (np.nan, np.nan, np.nan)
+
+    rho = df['rho'].values
+    P = df[col].values
+    n_trials = df['n_trials'].values
+
+    rng = np.random.default_rng(seed)
+    rho_c_samples = []
+
+    for _ in range(n_boot):
+        # Binomial resampling: draw new counts from Binomial(n, P)
+        counts = rng.binomial(n_trials.astype(int), np.clip(P, 0, 1))
+        P_boot = counts / n_trials
+
+        # Interpolate at P=0.5
+        if P_boot.max() < 0.5 or P_boot.min() > 0.5:
+            continue
+
+        for i in range(len(P_boot) - 1):
+            if P_boot[i] >= 0.5 >= P_boot[i + 1] and P_boot[i] != P_boot[i + 1]:
+                frac = (P_boot[i] - 0.5) / (P_boot[i] - P_boot[i + 1])
+                rc = rho[i] + frac * (rho[i + 1] - rho[i])
+                rho_c_samples.append(rc)
+                break
+
+    if len(rho_c_samples) < 10:
+        return (np.nan, np.nan, np.nan)
+
+    samples = np.array(rho_c_samples)
+    median = np.median(samples)
+    lo = np.percentile(samples, 2.5)
+    hi = np.percentile(samples, 97.5)
+    return (median, lo, hi)
