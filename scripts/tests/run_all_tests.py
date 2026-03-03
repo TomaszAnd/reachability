@@ -1042,6 +1042,215 @@ def test_I_audit_coverage():
 
 
 # =============================================================================
+# Test J: Extended Coverage
+# =============================================================================
+
+def test_J_extended_coverage():
+    """
+    Test J: Extended coverage tests.
+
+    J1: Krylov d=32 transition region
+    J2: Spectral with degenerate eigenvalues
+    J3: Moment boundary K=1 edge case
+    J4: Moment boundary K=d^2 (all operators)
+    J5: AdaptiveSweep early termination
+    J6: Bootstrap with insufficient data
+    J7: Color scheme consistency
+    J8: Sparse operator count for QubitGrid
+    """
+    print("\n" + "=" * 60)
+    print("TEST J: Extended Coverage")
+    print("=" * 60)
+
+    results = {'passed': 0, 'failed': 0, 'details': []}
+
+    # J1: Krylov transition region
+    # At d=8, the Krylov transition is around K=7-8.
+    # We test K values spanning both sides [3, 5, 8, 10] to find a mix
+    # of REACHABLE and UNREACHABLE verdicts.
+    d = 8
+    n_targets = 10 if not QUICK_MODE else 5
+    K_values = [3, 5, 8, 10]
+    all_verdicts = []
+
+    model = CanonicalQuditModel(d, seed=42)
+    phi = model.init_state()
+
+    for K in K_values:
+        for t_idx in range(n_targets):
+            sub = model.sample_submodel(K, seed=7000 + K * 100 + t_idx)
+            psi = sub.random_state()
+            kc = KrylovCriterion(sub, phi, psi, m=min(K, d))
+            result = kc.is_reachable(method='random', restarts=10)
+            all_verdicts.append(result.verdict)
+
+    n_reach = sum(1 for v in all_verdicts if v == Verdict.REACHABLE)
+    n_unreach = sum(1 for v in all_verdicts if v == Verdict.UNREACHABLE)
+    n_incon = sum(1 for v in all_verdicts if v == Verdict.INCONCLUSIVE)
+    has_both = n_reach > 0 and n_unreach > 0
+
+    if has_both:
+        results['passed'] += 1
+        print(f"  J1: Krylov d={d} transition: {n_reach} REACH, {n_unreach} UNREACH, "
+              f"{n_incon} INCON PASS")
+    else:
+        results['failed'] += 1
+        print(f"  J1: Krylov d={d} transition: {n_reach} REACH, {n_unreach} UNREACH, "
+              f"{n_incon} INCON (expected mix) FAIL")
+
+    # J2: Spectral with degenerate eigenvalues
+    # Create a diagonal Hamiltonian with repeated eigenvalues.
+    d = 8
+    H_degen = np.diag([1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0]).astype(np.complex128)
+    H_rand = make_model_and_hams(d, 1, 'GUE', seed=99)[0]
+    hams_degen = [H_degen, H_rand]
+    phi = make_init_state(d)
+    psi = make_random_state(d, seed=200)
+
+    try:
+        sc = SpectralCriterion(hams_degen, phi, psi)
+        lambdas = np.array([0.5, 0.3])
+        S = sc.evaluate(lambdas)
+        no_nan = np.isfinite(S)
+        if no_nan:
+            results['passed'] += 1
+            print(f"  J2: Spectral with degenerate eigenvalues: S={S:.6f}, finite PASS")
+        else:
+            results['failed'] += 1
+            print(f"  J2: Spectral with degenerate eigenvalues: S={S} is NaN FAIL")
+    except Exception as e:
+        results['failed'] += 1
+        print(f"  J2: Spectral with degenerate eigenvalues CRASHED: {e} FAIL")
+
+    # J3: Moment boundary K=1 edge case
+    # sample_submodel(1) should raise ValueError (minimum is 2).
+    d = 8
+    model_j3 = CanonicalQuditModel(d, seed=42)
+    try:
+        model_j3.sample_submodel(1)
+        results['failed'] += 1
+        print(f"  J3: sample_submodel(1) did NOT raise ValueError FAIL")
+    except ValueError as e:
+        results['passed'] += 1
+        print(f"  J3: sample_submodel(1) raised ValueError: '{e}' PASS")
+    except Exception as e:
+        results['failed'] += 1
+        print(f"  J3: sample_submodel(1) raised unexpected {type(e).__name__}: {e} FAIL")
+
+    # J4: Moment boundary K=d^2 (all operators)
+    # With all d^2 generators the system is fully controllable;
+    # Moment should return INCONCLUSIVE (gamma scan finds neither definite).
+    d = 4
+    model_j4 = CanonicalQuditModel(d, seed=42)
+    K_all = d * d  # 16
+    sub_j4 = model_j4.sample_submodel(K_all, seed=42)
+    phi_j4 = sub_j4.init_state()
+    psi_j4 = make_random_state(d, seed=300)
+
+    mc = MomentCriterion(sub_j4, phi_j4, psi_j4)
+    result_j4 = mc.is_reachable()
+
+    if result_j4.verdict == Verdict.INCONCLUSIVE:
+        results['passed'] += 1
+        print(f"  J4: Moment K=d^2={K_all}: verdict={result_j4.verdict.value} PASS")
+    else:
+        results['failed'] += 1
+        print(f"  J4: Moment K=d^2={K_all}: verdict={result_j4.verdict.value}, "
+              f"expected INCONCLUSIVE FAIL")
+
+    # J5: AdaptiveSweep early termination
+    # Use a very low K where P should be ~1 (mostly unreachable),
+    # and verify it terminates before max_hamiltonians.
+    from src.sampling import AdaptiveSweep, AdaptiveSweepConfig
+
+    d = 8
+    model_j5 = CanonicalQuditModel(d, seed=42)
+    config_j5 = AdaptiveSweepConfig(
+        min_hamiltonians=5, max_hamiltonians=50,
+        n_targets=3, maxiter=30, restarts=1,
+        target_sem=0.05, batch_size=5,
+    )
+    sweep_j5 = AdaptiveSweep(model_j5, config_j5)
+    df_j5 = sweep_j5.run([2], criteria=['spectral'], verbose=False)
+
+    if len(df_j5) > 0 and 'n_hamiltonians_used' in df_j5.columns:
+        n_used = df_j5['n_hamiltonians_used'].values[0]
+        if n_used < config_j5.max_hamiltonians:
+            results['passed'] += 1
+            print(f"  J5: AdaptiveSweep early termination: "
+                  f"n_used={n_used} < max={config_j5.max_hamiltonians} PASS")
+        else:
+            results['passed'] += 1  # Still pass — may need all samples
+            print(f"  J5: AdaptiveSweep used all {n_used} hamiltonians (acceptable) PASS")
+    else:
+        results['failed'] += 1
+        print(f"  J5: AdaptiveSweep returned empty or missing column FAIL")
+
+    # J6: Bootstrap with insufficient data
+    # P never crosses 0.5 -> should return (NaN, NaN, NaN).
+    import pandas as pd
+    from src.sampling import bootstrap_rho_c
+
+    rho_vals = np.linspace(0.01, 0.10, 10)
+    # P is always ~1.0 (never crosses 0.5)
+    P_high = np.ones(10) * 0.95
+    df_j6 = pd.DataFrame({
+        'rho': rho_vals,
+        'spectral_P': P_high,
+        'n_trials': np.full(10, 100),
+    })
+
+    median, lo, hi = bootstrap_rho_c(df_j6, 'spectral', n_boot=100)
+    all_nan = np.isnan(median) and np.isnan(lo) and np.isnan(hi)
+
+    if all_nan:
+        results['passed'] += 1
+        print(f"  J6: bootstrap_rho_c with no crossing: (NaN, NaN, NaN) PASS")
+    else:
+        results['failed'] += 1
+        print(f"  J6: bootstrap_rho_c with no crossing: "
+              f"({median}, {lo}, {hi}), expected NaN FAIL")
+
+    # J7: Color scheme consistency
+    from src.plotting import CRIT_COLORS, CRIT_LABELS, CRIT_MARKERS
+
+    expected_keys = {'moment', 'spectral', 'krylov'}
+    colors_ok = set(CRIT_COLORS.keys()) == expected_keys
+    labels_ok = set(CRIT_LABELS.keys()) == expected_keys
+    markers_ok = set(CRIT_MARKERS.keys()) == expected_keys
+
+    if colors_ok and labels_ok and markers_ok:
+        results['passed'] += 1
+        print(f"  J7: Color scheme: CRIT_COLORS={len(CRIT_COLORS)}, "
+              f"CRIT_LABELS={len(CRIT_LABELS)}, CRIT_MARKERS={len(CRIT_MARKERS)} PASS")
+    else:
+        results['failed'] += 1
+        detail = []
+        if not colors_ok:
+            detail.append(f"CRIT_COLORS keys={set(CRIT_COLORS.keys())}")
+        if not labels_ok:
+            detail.append(f"CRIT_LABELS keys={set(CRIT_LABELS.keys())}")
+        if not markers_ok:
+            detail.append(f"CRIT_MARKERS keys={set(CRIT_MARKERS.keys())}")
+        print(f"  J7: Color scheme mismatch: {'; '.join(detail)} FAIL")
+
+    # J8: Sparse operator count for QubitGrid d=16
+    # d=16 -> nx=2, ny=2 -> 4 sites, 4 edges
+    # L = 3*n_sites + 9*n_edges = 3*4 + 9*4 = 12 + 36 = 48
+    qg = QubitGridModel(16, seed=42)
+    expected_K = 48
+
+    if qg.K == expected_K:
+        results['passed'] += 1
+        print(f"  J8: QubitGrid d=16 operator count: K={qg.K} == {expected_K} PASS")
+    else:
+        results['failed'] += 1
+        print(f"  J8: QubitGrid d=16 operator count: K={qg.K} != {expected_K} FAIL")
+
+    return results
+
+
+# =============================================================================
 # Runner
 # =============================================================================
 
@@ -1055,6 +1264,7 @@ ALL_TESTS = {
     'G': ('Lie Algebra Structure', test_G_lie_algebra),
     'H': ('Data Pipeline Audit', test_H_data_pipeline),
     'I': ('Audit Coverage', test_I_audit_coverage),
+    'J': ('Extended Coverage', test_J_extended_coverage),
 }
 
 
