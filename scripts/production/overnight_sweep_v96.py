@@ -90,7 +90,8 @@ def two_pass_K_values(model, model_name, d, config):
     print(f"  Pass 1: coarse scan with {len(K_coarse)} K values...")
     sweep = DensitySweep(model, SweepConfig(
         n_hamiltonians=10, n_targets=5, tau=TAU,
-        maxiter=MAXITER, restarts=2, krylov_method='random',
+        maxiter=MAXITER, restarts=2, spectral_restarts=3,
+        krylov_method='random',
     ))
     criteria = _get_criteria(d)
     df_coarse = sweep.run(K_coarse, criteria=criteria, verbose=False)
@@ -309,6 +310,7 @@ def run_model_sweep(model_cls, model_name, d, model_kwargs=None):
     K_values = two_pass_K_values(model, model_name, d,
                                  AdaptiveSweepConfig())
 
+    spectral_restarts = 5 if d <= 32 else 10
     config = AdaptiveSweepConfig(
         min_hamiltonians=10,
         max_hamiltonians=150,
@@ -316,6 +318,7 @@ def run_model_sweep(model_cls, model_name, d, model_kwargs=None):
         tau=TAU,
         maxiter=MAXITER,
         restarts=RESTARTS,
+        spectral_restarts=spectral_restarts,
         krylov_method='random',
         target_sem=0.02,
         batch_size=10,

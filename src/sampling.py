@@ -81,6 +81,7 @@ class SweepConfig:
     tau: float = 0.99
     maxiter: int = 100
     restarts: int = 3
+    spectral_restarts: int = 5  # Spectral needs more restarts than Krylov
     method: str = 'L-BFGS-B'
     krylov_method: str = 'random'  # 'random' is 12x faster with same verdicts
     krylov_m: Optional[int] = None  # None = use full dimension d
@@ -89,13 +90,16 @@ class SweepConfig:
     @classmethod
     def fast(cls) -> 'SweepConfig':
         """Quick validation config."""
-        return cls(n_hamiltonians=20, n_targets=10, maxiter=50, restarts=2)
+        return cls(n_hamiltonians=20, n_targets=10, maxiter=50, restarts=2,
+                   spectral_restarts=3)
 
     @classmethod
     def production(cls, dim: Optional[int] = None) -> 'SweepConfig':
         """Publication-quality config with dimension-adaptive maxiter."""
         maxiter = 100 if dim is None or dim <= 32 else 150
-        return cls(n_hamiltonians=150, n_targets=30, maxiter=maxiter, restarts=3)
+        spectral_restarts = 5 if dim is None or dim <= 32 else 10
+        return cls(n_hamiltonians=150, n_targets=30, maxiter=maxiter, restarts=3,
+                   spectral_restarts=spectral_restarts)
 
 
 def _check_early_stop(row: Dict, criteria: List[str],
@@ -174,7 +178,7 @@ class DensitySweep:
             if 'spectral' in criteria:
                 sc = SpectralCriterion(sub_model, phi, psi, tau=cfg.tau)
                 result = sc.is_reachable(
-                    maxiter=cfg.maxiter, restarts=cfg.restarts,
+                    maxiter=cfg.maxiter, restarts=cfg.spectral_restarts,
                     method=cfg.method)
                 if result.verdict == Verdict.UNREACHABLE:
                     counts['spectral'] += 1
@@ -393,14 +397,17 @@ class AdaptiveSweepConfig(SweepConfig):
         """Quick validation config."""
         return cls(min_hamiltonians=10, max_hamiltonians=30,
                    n_targets=5, maxiter=50, restarts=2,
+                   spectral_restarts=3,
                    target_sem=0.05, batch_size=5)
 
     @classmethod
     def production(cls, dim: Optional[int] = None) -> 'AdaptiveSweepConfig':
         """Publication-quality config."""
         maxiter = 100 if dim is None or dim <= 32 else 150
+        spectral_restarts = 5 if dim is None or dim <= 32 else 10
         return cls(min_hamiltonians=30, max_hamiltonians=200,
                    n_targets=20, maxiter=maxiter, restarts=3,
+                   spectral_restarts=spectral_restarts,
                    target_sem=0.015, batch_size=10)
 
 
