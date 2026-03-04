@@ -215,52 +215,71 @@ class CanonicalQuditModel(QuantumModel):
     """
 
     def __init__(self, dim: int, include_identity: bool = True,
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None, K_max: Optional[int] = None):
         self.include_identity = include_identity
+        self.K_max = K_max
         super().__init__(dim, seed)
 
     def _build_basis(self) -> List[np.ndarray]:
         d = self.dim
+        limit = self.K_max  # None means build all
         operators = []
+
+        def _check_limit():
+            return limit is not None and len(operators) >= limit
 
         # X_jk operators
         for j in range(d):
+            if _check_limit():
+                break
             for k in range(j + 1, d):
                 mat = np.zeros((d, d), dtype=np.complex128)
                 mat[j, k] = 1.0
                 mat[k, j] = 1.0
                 operators.append(mat)
+                if _check_limit():
+                    break
 
         # Y_jk operators
-        for j in range(d):
-            for k in range(j + 1, d):
-                mat = np.zeros((d, d), dtype=np.complex128)
-                mat[j, k] = -1j
-                mat[k, j] = 1j
-                operators.append(mat)
+        if not _check_limit():
+            for j in range(d):
+                if _check_limit():
+                    break
+                for k in range(j + 1, d):
+                    mat = np.zeros((d, d), dtype=np.complex128)
+                    mat[j, k] = -1j
+                    mat[k, j] = 1j
+                    operators.append(mat)
+                    if _check_limit():
+                        break
 
         # Z_j operators
-        for j in range(d - 1):
-            mat = np.zeros((d, d), dtype=np.complex128)
-            mat[j, j] = 1.0
-            mat[j + 1, j + 1] = -1.0
-            operators.append(mat)
+        if not _check_limit():
+            for j in range(d - 1):
+                mat = np.zeros((d, d), dtype=np.complex128)
+                mat[j, j] = 1.0
+                mat[j + 1, j + 1] = -1.0
+                operators.append(mat)
+                if _check_limit():
+                    break
 
         # Identity
-        if self.include_identity:
+        if not _check_limit() and self.include_identity:
             operators.append(np.eye(d, dtype=np.complex128))
 
-        expected_L = d * d if self.include_identity else d * d - 1
-        assert len(operators) == expected_L, (
-            f"Operator count mismatch: got {len(operators)}, expected {expected_L}")
+        if limit is None:
+            expected_L = d * d if self.include_identity else d * d - 1
+            assert len(operators) == expected_L, (
+                f"Operator count mismatch: got {len(operators)}, expected {expected_L}")
 
         return operators
 
     def sample_submodel(self, k: int, seed: Optional[int] = None) -> QuantumModel:
-        """Sample k operators from the d^2 canonical basis without replacement."""
+        """Sample k operators from the canonical basis without replacement."""
         if seed is not None:
             fresh = CanonicalQuditModel(
-                self.dim, include_identity=self.include_identity, seed=seed)
+                self.dim, include_identity=self.include_identity, seed=seed,
+                K_max=self.K_max)
             return fresh.sample_submodel(k)
 
         L = self.K

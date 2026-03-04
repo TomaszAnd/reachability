@@ -5,10 +5,10 @@
 Quantum reachability analysis: testing whether target quantum states are reachable
 under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 
-## Current State (v0.4.3)
+## Current State (v0.4.4)
 
 - Branch: `fast` (pushed to GitHub)
-- All 58 tests passing (34 original + 10 audit + 8 extended + 6 rho_c)
+- All 65 tests passing (34 original + 10 audit + 8 extended + 6 rho_c + 7 v0.4.4)
 - Class-based API, pure numpy (no qutip dependency)
 - Optional JAX backend for GPU acceleration
 
@@ -33,6 +33,11 @@ under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 - **Chunked Spectral gradient** — processes in batches of 64 to limit memory
 - **QubitGrid d=256** in v96 sweep (Moment+Krylov only, Spectral infeasible)
 - **rho_c summary export** — CSV/JSON from v96 sweep, `load_rho_c_summary()` helper
+- **`random_polish` optimizer** — random search + short L-BFGS-B polish, 5-10x faster for Spectral at d>=128
+- **Block sparse gradient** — `(K*d, d)` CSR block matrix replaces K-loops in Spectral/Krylov/Moment gradient
+- **`K_max` for CanonicalQuditModel** — truncates basis to avoid OOM at d>=256 (K_max=3000 covers ρ~0.046)
+- **`spectral_method` in SweepConfig** — `'random_polish'` for d>=128, `'L-BFGS-B'` for smaller dims
+- **Canonical d=256** now feasible via K_max + random_polish
 
 ### Key Findings
 1. **Spectral/Krylov**: Show Fermi-Dirac phase transitions P(ρ) = 1/(1+exp((ρ-ρc)/Δ))
@@ -75,7 +80,7 @@ under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 ## Running Tests
 
 ```bash
-python scripts/tests/run_all_tests.py         # Full (58 tests)
+python scripts/tests/run_all_tests.py         # Full (65 tests)
 python scripts/tests/run_all_tests.py --quick  # Quick (~3s)
 ```
 
@@ -117,7 +122,7 @@ scripts/
 │   ├── sweep_production.py      # Production sweep (auto JAX/NumPy selection)
 │   └── plot_overnight_v7style.py # Publication figure generation
 └── tests/
-    ├── run_all_tests.py            # 58 tests in 11 groups (A-K)
+    ├── run_all_tests.py            # 65 tests in 12 groups (A-L)
     └── confusion_matrix_benchmark.py
 
 notebooks/
@@ -166,13 +171,16 @@ since eigendecomposition is already BLAS-optimized.
 - M1 Metal GPU not supported (jax-metal broken for complex numbers)
 - Verdicts match NumPy at all tested dimensions
 
-### d=256 Feasibility
+### d=256 Feasibility (measured on M1)
 
-- **Canonical d=256**: K=d²=65536 operators, requires >64GB RAM — infeasible on 16GB
-- **QubitGrid d=256 Krylov random**: ~11ms/trial — very fast, included in v96 sweep
-- **QubitGrid d=256 Spectral**: ~41s/trial (is_reachable, r=10) — infeasible for overnight
-- **QubitGrid d=256 Moment**: ~0.7ms/trial — very fast
-- **v96 sweep strategy**: d≥256 uses Moment+Krylov only (Spectral skipped)
+- **Canonical d=256 K_max=1500**: init <1s, ~1.6GB RAM — feasible
+- **Can d=256 Spectral random_polish** (top-1, maxiter=5): K=2: 3.8s, K=200: 12s, K=500: 27s, K=700: 37s
+- **Can d=256 Moment**: K=200: 112ms, K=500: 355ms
+- **Can d=256 Krylov random**: K=200: 86ms, K=500: 235ms (but skipped in sweep — dense _construct_H too slow at large K)
+- **QubitGrid d=256**: K=114 operators, rho_max=0.0017 << rho_c~0.05 — transition NOT capturable, skipped in v96
+- **QG d=256 timing**: Moment: 3ms, Krylov: 19ms, Spectral RP: 7.9s (all at K=50)
+- **random_polish dim-adaptive**: d>=256 uses top-1 + maxiter=5 (27s vs 57s old, correctness preserved)
+- **v96 sweep strategy**: d>=128 uses `random_polish` for Spectral (dim-adaptive internally)
 - **JAX at d=256**: SLOWER than NumPy (autodiff through 255 Lanczos steps unstable)
 - **Strategy**: JAX for d≤128, NumPy for d≥256
 
@@ -232,7 +240,16 @@ python scripts/benchmark_scaling.py              # Scaling analysis
 python scripts/benchmark_platform.py             # Platform-specific eigh
 python scripts/estimate_sweep_time.py            # Sweep time projection
 ```
-## Recent Changes (v0.4.3)
+## Recent Changes (v0.4.4)
+
+1. **`random_polish` optimizer**: New `method='random_polish'` in `OptimizableCriterion._maximize()`. Phase 1: 200+ random forward evals tracking top-3 candidates. Phase 2: short L-BFGS-B polish (maxiter=10) from top-3. Expected 5-10x faster than full L-BFGS-B for Spectral at d>=128.
+2. **Block sparse gradient**: `(K*d, d)` CSR block matrix built at init. Replaces K-loops in Spectral gradient, Krylov gradient, and Moment `_check()` with single sparse matmul.
+3. **`K_max` for CanonicalQuditModel**: Optional `K_max` parameter truncates basis during construction. Enables d=256 Canonical (K_max=3000 uses ~3MB vs 68GB for full d²=65536).
+4. **`spectral_method` in SweepConfig**: New field `spectral_method` (default `'L-BFGS-B'`). `production()` uses `'random_polish'` for d>=128. `fast()` always uses `'random_polish'`.
+5. **v96 sweep updated**: Canonical d=256 via K_max=1500 + pure random Spectral. QG d=256 skipped (ρ_max=0.0017). Canonical d>=128: Moment+Spectral only. SPECTRAL_KC[canonical][256]=700.
+6. **7 new tests** (Test L): random_polish, K_max, block sparse gradient. Total: 65 tests in 12 groups (A-L).
+
+## Previous Changes (v0.4.3)
 
 1. **`spectral_restarts` field**: Added to `SweepConfig` and `AdaptiveSweepConfig`. Spectral L-BFGS-B needs 5-10 restarts (vs Krylov random search's 3) to avoid false UNREACHABLE verdicts. Dimension-adaptive: 5 for d≤32, 10 for d≥64.
 2. **rho_c summary export**: v96 sweep saves `rho_c_summary.csv` and `rho_c_summary.json`. New `load_rho_c_summary()` helper in sampling.py.
@@ -274,5 +291,9 @@ Benchmarked at d=16,32 transition regions: Random-50 gives 100% verdict agreemen
 - Two-pass K selection: coarse scan → dense around ρ_c
 - Bootstrap ρ_c confidence intervals
 - `spectral_restarts`: coarse pass=3, main pass=5 (d≤32) or 10 (d≥64)
-- QubitGrid d=256: Moment+Krylov only (`--no-256` to skip)
+- `spectral_method`: `'random'` for d>=256, `'random_polish'` for d=128, `'L-BFGS-B'` for d<128
+- Canonical d=256: K_max=1500 (covers ρ up to ~0.023, well above ρ_c≈0.011)
+- Canonical d>=128: Moment+Spectral only (Krylov skipped — dense ops too slow)
+- QubitGrid d=256 skipped (K=114, ρ_max=0.0017 << ρ_c)
+- SPECTRAL_KC: canonical d=256 → K_c=700 (extrapolated)
 - Outputs: per-dimension CSVs + `rho_c_summary.csv` + `rho_c_summary.json`

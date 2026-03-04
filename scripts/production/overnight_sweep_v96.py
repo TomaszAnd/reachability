@@ -58,8 +58,9 @@ RESTARTS = 3
 
 # Spectral K_c estimates (from v95 regression)
 SPECTRAL_KC = {
-    'canonical': {16: 25, 32: 55, 64: 122, 128: 273},
+    'canonical': {16: 25, 32: 55, 64: 122, 128: 273, 256: 700},
     'qubitgrid': {16: 11, 32: 21, 64: 42, 128: 85},
+    # No qubitgrid d=256: K=114, rho_max=0.0017 << rho_c~0.05
 }
 
 MODEL_LINESTYLES = {'canonical': '-', 'qubitgrid': '--'}
@@ -87,13 +88,20 @@ def two_pass_K_values(model, model_name, d, config):
     ))
     K_coarse = [k for k in K_coarse if K_min <= k <= K_max]
 
+    # Spectral method for coarse scan: random_polish at d>=128
+    if d >= 128:
+        coarse_spectral = 'random_polish'
+    else:
+        coarse_spectral = 'L-BFGS-B'
+
     print(f"  Pass 1: coarse scan with {len(K_coarse)} K values...")
     sweep = DensitySweep(model, SweepConfig(
         n_hamiltonians=10, n_targets=5, tau=TAU,
         maxiter=MAXITER, restarts=2, spectral_restarts=3,
+        spectral_method=coarse_spectral,
         krylov_method='random',
     ))
-    criteria = _get_criteria(d)
+    criteria = _get_criteria(d, model_name)
     df_coarse = sweep.run(K_coarse, criteria=criteria, verbose=False)
 
     if len(df_coarse) == 0:
@@ -131,13 +139,11 @@ def two_pass_K_values(model, model_name, d, config):
 def _get_criteria(d, model_name=None):
     """Select criteria based on dimension and model.
 
-    - Krylov skipped at d>=128 for Canonical (too slow with dense ops)
-    - Spectral skipped at d>=256 (41s/trial, infeasible for overnight)
-    - QubitGrid d=256 runs Moment+Krylov only (~11ms/trial Krylov)
+    - QubitGrid: all 3 criteria at all dims (sparse ops, fast Krylov random)
+    - Canonical d>=128: Krylov skipped (dense _construct_H too slow at large K)
+    - d>=128: random_polish for Spectral (5-10x faster than L-BFGS-B)
     """
-    if d >= 256:
-        return ['moment', 'krylov']
-    if d >= 128:
+    if d >= 128 and model_name == 'canonical':
         return ['moment', 'spectral']
     return ['moment', 'spectral', 'krylov']
 
@@ -311,13 +317,23 @@ def plot_rho_c_vs_inv_d(all_results, save_path, use_latex=False):
 def run_model_sweep(model_cls, model_name, d, model_kwargs=None):
     """Run two-pass adaptive sweep for one (model, d) combination."""
     model_kwargs = model_kwargs or {}
+    # Canonical d>=256: K_max caps basis size to avoid OOM (d²=65536 at d=256)
+    # K_max=1500 covers rho up to 0.023, well above K_c≈700 (rho_c≈0.011)
+    if model_name == 'canonical' and d >= 256 and 'K_max' not in model_kwargs:
+        model_kwargs['K_max'] = 1500
     model = model_cls(dim=d, seed=42, **model_kwargs)
 
-    criteria = _get_criteria(d)
+    criteria = _get_criteria(d, model_name)
     K_values = two_pass_K_values(model, model_name, d,
                                  AdaptiveSweepConfig())
 
     spectral_restarts = 5 if d <= 32 else 10
+    # random_polish at d>=128: dimension-adaptive polish params
+    # handle the gradient cost internally (top-1, maxiter=5 at d>=256)
+    if d >= 128:
+        spectral_method = 'random_polish'
+    else:
+        spectral_method = 'L-BFGS-B'
     config = AdaptiveSweepConfig(
         min_hamiltonians=10,
         max_hamiltonians=150,
@@ -326,6 +342,7 @@ def run_model_sweep(model_cls, model_name, d, model_kwargs=None):
         maxiter=MAXITER,
         restarts=RESTARTS,
         spectral_restarts=spectral_restarts,
+        spectral_method=spectral_method,
         krylov_method='random',
         target_sem=0.02,
         batch_size=10,
@@ -348,11 +365,12 @@ def main():
     args = parser.parse_args()
 
     dims = [16] if args.quick else args.dims
-    # QubitGrid includes d=256 by default (Moment+Krylov only, ~1h)
-    if args.no_256:
-        qubitgrid_dims = [d for d in dims if d != 256]
-    else:
-        qubitgrid_dims = sorted(set(dims) | {256})
+    # Canonical d=256: feasible with K_max=1500 + random Spectral
+    if not args.quick and not args.no_256:
+        dims = sorted(set(dims) | {256})
+    # QubitGrid d=256: K=114 operators, rho_max=0.0017 << rho_c~0.05
+    # Transition not capturable — skip by default
+    qubitgrid_dims = [d for d in dims if d != 256]
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     FIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -362,8 +380,9 @@ def main():
         print(f"  d=16:   ~2 min (both models)")
         print(f"  d=32:   ~30 min (both models)")
         print(f"  d=64:   ~5 hours (both models)")
-        print(f"  d=128:  ~17 hours (Spectral+Moment only)")
-        print(f"  d=256:  QubitGrid only, ~1 hour (Moment+Krylov, Spectral infeasible)")
+        print(f"  d=128:  ~4 hours (random_polish Spectral, QG all 3, Can M+S)")
+        print(f"  d=256:  ~16 hours Canonical only (random_polish, K_max=1500)")
+        print(f"  NOTE: QG d=256 skipped (K=114, rho_max=0.0017 << rho_c)")
         return
 
     use_latex = _setup_latex()
@@ -388,9 +407,6 @@ def main():
         print("CANONICAL QUDIT MODEL")
         print("=" * 60)
         for d in dims:
-            if d >= 256:
-                print(f"\n--- Canonical d={d}: SKIPPED (requires ~68GB RAM) ---")
-                continue
             print(f"\n--- Canonical d={d} ---")
             t0 = time.time()
             df = run_model_sweep(CanonicalQuditModel, 'canonical', d)
@@ -405,7 +421,7 @@ def main():
             })
             print(f"  Done: {len(df)} K values, {runtime/60:.1f} min")
 
-            plot_P_vs_rho(df, 'canonical', d, _get_criteria(d),
+            plot_P_vs_rho(df, 'canonical', d, _get_criteria(d, 'canonical'),
                           FIG_DIR / f"P_vs_rho_canonical_d{d}.png", use_latex)
 
     # QubitGrid sweeps
@@ -435,7 +451,7 @@ def main():
             })
             print(f"  Done: {len(df)} K values, {runtime/60:.1f} min")
 
-            plot_P_vs_rho(df, 'qubitgrid', d, _get_criteria(d),
+            plot_P_vs_rho(df, 'qubitgrid', d, _get_criteria(d, 'qubitgrid'),
                           FIG_DIR / f"P_vs_rho_qubitgrid_d{d}.png", use_latex)
 
     # Save timing log
@@ -460,7 +476,7 @@ def main():
         for d in sorted(all_results[model_name].keys()):
             df = all_results[model_name][d]
             parts = []
-            for crit in _get_criteria(d):
+            for crit in _get_criteria(d, model_name):
                 rc = estimate_rho_c(df, crit)
                 med, lo, hi = bootstrap_rho_c(df, crit)
                 n_K = len(df)
