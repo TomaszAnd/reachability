@@ -5,12 +5,25 @@
 Quantum reachability analysis: testing whether target quantum states are reachable
 under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 
-## Current State (v0.4.4)
+## Current State (v0.4.5 / v100 sweep)
 
 - Branch: `fast` (pushed to GitHub)
 - All 65 tests passing (34 original + 10 audit + 8 extended + 6 rho_c + 7 v0.4.4)
 - Class-based API, pure numpy (no qutip dependency)
 - Optional JAX backend for GPU acceleration
+
+### Active Task: v100 Production Sweep
+
+IMPORTANT: The v96 sweep process should be killed before launching v100.
+Check `logs/v96_resume_can.pid` and kill it.
+
+v100 sweep improvements over v96:
+1. Per-criterion early stopping (don't sample Krylov at ρ >> ρ_c(Krylov))
+2. ρ_max caps per (model, d) — no empty whitespace in plots
+3. Consistent optimizer: L-BFGS-B when K_c < 100, random_polish when K_c ≥ 100
+4. Fermi-Dirac curve fitting for Spectral/Krylov, exponential for Moment
+5. Linear fit on ρ_c vs 1/d with confidence bands
+6. Phased execution: d≤64 first, then d=128, then d=256
 
 ### Completed Features
 - Class-based API (`QuantumModel`, `*Criterion`, `DensitySweep`)
@@ -28,22 +41,58 @@ under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 - Two Hamiltonian families: CanonicalQudit and QubitGrid
 - Comprehensive Krylov analysis notebook explaining QubitGrid P=0
 - **Separate `spectral_restarts`** field in SweepConfig (5-10, vs Krylov's 3)
-- **Eigendecomposition caching** in SpectralCriterion (avoids redundant eigh during line search)
+- **Eigendecomposition caching** in SpectralCriterion
 - **Sparse Krylov gradient** — keeps H sparse throughout gradient loop
 - **Chunked Spectral gradient** — processes in batches of 64 to limit memory
-- **QubitGrid d=256** in v96 sweep (Moment+Krylov only, Spectral infeasible)
-- **rho_c summary export** — CSV/JSON from v96 sweep, `load_rho_c_summary()` helper
-- **`random_polish` optimizer** — random search + short L-BFGS-B polish, 5-10x faster for Spectral at d>=128
-- **Block sparse gradient** — `(K*d, d)` CSR block matrix replaces K-loops in Spectral/Krylov/Moment gradient
-- **`K_max` for CanonicalQuditModel** — truncates basis to avoid OOM at d>=256 (K_max=3000 covers ρ~0.046)
-- **`spectral_method` in SweepConfig** — `'random_polish'` for d>=128, `'L-BFGS-B'` for smaller dims
-- **Canonical d=256** now feasible via K_max + random_polish
+- **rho_c summary export** — CSV/JSON from sweep, `load_rho_c_summary()` helper
+- **`random_polish` optimizer** — random search + short L-BFGS-B polish
+- **Block sparse gradient** — `(K*d, d)` CSR block matrix replaces K-loops
+- **`K_max` for CanonicalQuditModel** — truncates basis for d>=256
 
 ### Key Findings
-1. **Spectral/Krylov**: Show Fermi-Dirac phase transitions P(ρ) = 1/(1+exp((ρ-ρc)/Δ))
-2. **Moment**: Shows exponential decay P(ρ) = exp(-ρ/λ)
-3. **QubitGrid Krylov**: Always P=0 (generic Paulis span full Hilbert space)
-4. **Scaling**: ρc decreases with d as expected
+1. **Criterion-specific fits**: Exponential for Moment (P(0)=1), Log-logistic for Spectral/Krylov
+2. **Canonical**: K_c ~ αd for Moment (α=0.34) and Krylov (α=0.68), giving ρ_c ~ 1/d
+3. **Canonical Spectral**: K_c ~ 0.590·d·ln(d) (R²=0.993, coupon-collector argument)
+4. **QubitGrid Moment/Krylov**: K_c ≈ 2-3 (constant), ρ_c ~ 1/d²
+5. **QubitGrid Spectral**: K_c ~ 0.601d (R²=0.997, includes d=128). Transition at d=128 confirmed (v105b, 20 restarts).
+6. **QubitGrid K_max limitation**: K_max = 3n+9|E| grows polynomially, K_c grows exponentially. d=128 borderline, d≥256 infeasible.
+
+### CRITICAL: Known Issues
+- **Moment non-monotonicity**: Expected physics — sufficient condition, not necessary. Fit the descending envelope only.
+
+### QubitGrid Spectral at d≥128
+
+K_max for QG = 3·n_qubits + 9·|E(lattice)|. Grows polynomially in n_qubits,
+while K_c ~ 0.601·d grows exponentially.
+
+| d   | Best lattice | K_max | K_c(fit) | Status |
+|-----|-------------|-------|----------|--------|
+| 128 | 1×7         | 75    | 78.3     | Transition onset visible (P=0.813 at K=75) |
+| 256 | 2×4         | 114   | ~154     | Infeasible (gap=-40) |
+
+v105b probe (20 L-BFGS-B restarts, 150 trials): transition found at d=128!
+P drops from 1.0 (K≤66) to 0.813 (K=75). K_c=78.3 just beyond K_max=75.
+Previous probes (v104, 5 restarts) missed it — needed 20 restarts to resolve.
+K_c=0.601d scaling (R²=0.997) now includes d=128 data point.
+d=256: K_max=114 << K_c≈154, no lattice geometry helps.
+
+### v104/v105 Sweep Infrastructure
+
+- d=128 model: ~400 MB (Can) / ~120 MB (QG sparse)
+- d=256 model: ~1.5 GB (K_max=1500 dense 256×256 complex matrices)
+- **NEVER run d=128 and d=256 sweeps simultaneously** — OOM risk
+- Incremental CSV saving: crash-safe, auto-resume on restart
+- v105b adaptive tiers: light effort (25 trials) for plateau/tail, heavy (150 trials,
+  20 restarts) for critical zone. Cuts runtime 3-4x vs uniform settings.
+- Restart cap fix in criteria.py: `max(restarts, 12)` allows caller to request >12
+
+### Sweep Scripts
+- `sweep_v104_high_stats.py`: phased d=128/256, `--n-hams`/`--n-targets` CLI
+- `sweep_v105b_adaptive.py`: L-BFGS-B only, tiered effort, `--run d128/2/all`
+
+### Krylov L-BFGS-B Timing
+- d=128: ~6s/restart (29s total with 5 restarts)
+- d=256: ~25s/restart (125s total with 5 restarts) — very expensive
 
 ## Key Files
 
@@ -55,11 +104,11 @@ under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 | `src/math_utils.py` | `eigendecompose`, `compute_binomial_sem`, `clip_to_bounds` |
 | `src/plotting.py` | Color schemes (DIM_COLORS, CRIT_COLORS) and fit functions |
 | `src/backend.py` | Backend abstraction (numpy/jax) |
-| `src/criteria_jax.py` | JAX-accelerated criteria (optional) |
-| `scripts/benchmark.py` | Performance benchmark suite |
-| `notebooks/quickstart.ipynb` | Interactive demo (~10-15 min) |
-| `notebooks/moment_nonmonotonicity_analysis.ipynb` | Moment non-monotonicity analysis |
-| `notebooks/krylov_qubitgrid_analysis.ipynb` | Why QubitGrid Krylov is always P=0 |
+| `scripts/production/overnight_sweep_v101.py` | v101 sweep (6 dims, per-K timeout, two-pass K selection) |
+| `scripts/production/overnight_sweep_v102.py` | **CURRENT** v102 sweep (25 even K, L-BFGS-B universal, 5min timeout) |
+| `scripts/production/sweep_v104_high_stats.py` | v104 high-stats sweep (d=128/256, incremental save, resume, OOM-safe) |
+| `scripts/production/sweep_v105b_adaptive.py` | v105b L-BFGS-B sweep with adaptive tiered effort |
+| `scripts/plot_v100.py` | Plotting with curve fitting (used by v101/v102) |
 
 ## Naming Conventions
 
@@ -68,14 +117,76 @@ under parameterized Hamiltonians using spectral, Krylov, and moment criteria.
 - `OptimizableCriterion` — intermediate ABC for Spectral/Krylov (has `_maximize`)
 - K is the primary parameter (not rho = K/d^2)
 
-## Data Flow
+## Style Guide
 
-- CSV data: `data/canonical/`, `data/qubitgrid/`
-- Plots: `fig/canonical/`, `fig/qubitgrid/`
+- Use `Edit` for targeted changes, `Read` before editing
+- Prefer numpy arrays (no qutip.Qobj in interfaces)
+- Use `np.random.SeedSequence.spawn()` for parallel-safe RNG
+- NEVER use `.entropy` on spawned SeedSequence — use `.generate_state(1)[0]`
+- CRIT_COLORS: moment=green (C2), spectral=blue (C0), krylov=orange (C1)
+- CRIT_MARKERS: moment='o', spectral='s', krylov='^'
+- Plots: NO TITLES. Error bars with capsize=3. Grid alpha=0.3.
 
-### Production Data
-- v58 run: Canonical d=16,32,64 and QubitGrid d=16,32,64 with 200 trials
-- v63 run: Canonical d=16,32 with 500 trials, improved K sampling (d=64 incomplete)
+## Curve Fitting Specifications
+
+### Moment: Simple Exponential
+```python
+P(ρ) = exp(-ρ / λ)    # enforces P(0) = 1
+ρ_c = λ · ln(2)        # P(ρ_c) = 0.5
+```
+- Physically motivated: random matrix decay
+- Fermi-Dirac gives P(0) < 1 for Moment (e.g. 0.79 at Can d=32) — do NOT use
+- QG Moment: step function (vertical dashed line) when <3 transition points
+
+### Spectral/Krylov: Log-Logistic
+```python
+P(ρ) = (ρ_c/ρ)^β / (1 + (ρ_c/ρ)^β)
+```
+- P(0) = 1 exactly, P(ρ_c) = 0.5, naturally asymmetric (flat plateau → sharp drop)
+- Fit parameters: ρ_c, β (steepness)
+- Plot as semi-transparent line (alpha=0.5) over data points
+- Fit on transition region mask (0.02 < P < 0.98) via scipy curve_fit
+- If fit fails (<3 transition points or R²<0.5): vertical dashed line at ρ_c
+
+### Power-Law Scaling (ρ_c vs d)
+```python
+ρ_c = a * d^(-α)
+```
+- Log-log regression, weighted by 1/CI_width
+- Canonical Moment/Krylov: α ≈ 1 (ρ_c ~ 1/d)
+- Canonical Spectral: α ≈ 0.65 (K_c super-linear ~d^1.35)
+- QubitGrid Moment/Krylov: α ≈ 2 (K_c constant, ρ_c ~ 1/d²)
+- QubitGrid Spectral: α ≈ 0.9 (ρ_c ~ 1/d)
+
+### K_c vs d
+- K_c = α·d (forced through origin) for linear series
+- Horizontal line at K_c = const for QG Moment/Krylov
+- Both on log-log axes
+
+## Optimizer Selection Logic
+
+```
+spectral_method selection:
+  K_c < 100  →  'L-BFGS-B'       (small K: need precise gradient optimization)
+  K_c ≥ 100  →  'random_polish'   (large K: random search + polish)
+```
+
+CRITICAL: K_max random sampling (v0.4.6) — CanonicalQuditModel with K_max now randomly
+samples from the full d² operator types (X, Y, Z). The old sequential truncation produced
+only X-type operators concentrated in rows 0-5, making Spectral scores cap at ~0.6.
+With balanced sampling, random_polish achieves score ≥ 0.99 at d=256 for K ≥ 800.
+
+IMPORTANT: QubitGrid d=128 has K_max=75, K_c≈85. Since K_c < 100, use L-BFGS-B.
+The spectral_restarts should be 10 for all QubitGrid dims.
+
+## ρ_max Caps (v100)
+
+```python
+RHO_MAX = {
+    'canonical': {16: 0.20, 32: 0.20, 64: 0.10, 128: 0.06, 256: 0.03},
+    'qubitgrid': {16: 0.08, 32: 0.04, 64: 0.02, 128: 0.008},
+}
+```
 
 ## Running Tests
 
@@ -84,144 +195,34 @@ python scripts/tests/run_all_tests.py         # Full (65 tests)
 python scripts/tests/run_all_tests.py --quick  # Quick (~3s)
 ```
 
-## Common Tasks
+## Common Commands
 
 ```bash
-# Generate publication plots from overnight CSV data
-python scripts/production/plot_overnight_v7style.py
+# Launch v102 sweep (phased)
+nohup python -u scripts/production/overnight_sweep_v102.py > logs/v102_sweep.log 2>&1 &
+echo $! > logs/v102_sweep.pid
 
-# Run confusion matrix benchmark
-python scripts/tests/confusion_matrix_benchmark.py
+# Monitor
+tail -f logs/v102_sweep.log
 
-# Run production sweeps (auto JAX/NumPy backend)
-python scripts/production/sweep_production.py --model qubitgrid --dims 16 32 64 128 --krylov-only
-python scripts/production/sweep_production.py --model canonical --dims 16 32 64
+# Quick test (d=16 only, ~30 min)
+python scripts/production/overnight_sweep_v102.py --quick
 
-# Run overnight production experiments (legacy)
-python scripts/production/overnight_canonical.py
-python scripts/production/overnight_qubitgrid.py
+# Generate plots from existing data
+python scripts/plot_v100.py
 ```
-
-## Code Structure
-
-```
-src/
-├── models.py         # QuantumModel, CanonicalQuditModel, QubitGridModel (sparse support)
-├── criteria.py       # SpectralCriterion, KrylovCriterion, MomentCriterion (vectorized, sparse)
-├── criteria_jax.py   # JAX-accelerated criteria (optional)
-├── sampling.py       # DensitySweep, SweepConfig, AdaptiveSweep
-├── backend.py        # numpy/jax backend abstraction
-├── math_utils.py     # eigendecompose, Krylov utilities
-├── plotting.py       # Fit functions, color schemes
-└── __init__.py       # Package exports (v0.4.0)
-
-scripts/
-├── production/
-│   ├── overnight_canonical.py   # Canonical production runs
-│   ├── overnight_qubitgrid.py   # QubitGrid production runs
-│   ├── sweep_production.py      # Production sweep (auto JAX/NumPy selection)
-│   └── plot_overnight_v7style.py # Publication figure generation
-└── tests/
-    ├── run_all_tests.py            # 65 tests in 12 groups (A-L)
-    └── confusion_matrix_benchmark.py
-
-notebooks/
-├── quickstart.ipynb                  # Getting started (~5-8 min)
-└── krylov_qubitgrid_analysis.ipynb   # Krylov analysis
-
-data/
-├── canonical/    # Canonical model CSV results
-└── qubitgrid/    # QubitGrid model CSV results
-```
-
-## Style Guide
-
-- Use `Edit` for targeted changes, `Read` before editing
-- Prefer numpy arrays (no qutip.Qobj in interfaces)
-- Use `np.random.SeedSequence.spawn()` for parallel-safe RNG
-- NEVER use `.entropy` on spawned SeedSequence — use `.generate_state(1)[0]`
-- Publication plots: DIM_COLORS (8=blue, 16=orange, 32=green, 64=red)
-- CRIT_COLORS (moment=green, spectral=blue, krylov=orange)
 
 ## Performance
 
-### is_reachable() at d=64, K=32, maxiter=50, restarts=2
+### Spectral Method Timing at Various d
 
-| Model | Spectral (NumPy) | Krylov (NumPy) | Krylov (JAX CPU) |
-|-------|-----------------|----------------|------------------|
-| Canonical | 441ms | 454ms | **26ms** |
-| QubitGrid | 494ms | 327ms | **5ms** |
-
-### is_reachable() at d=128, K=64, maxiter=50, restarts=2
-
-| Model | Spectral (NumPy) | Krylov (NumPy) | Krylov (JAX CPU) |
-|-------|-----------------|----------------|------------------|
-| Canonical | 5111ms | 4160ms | **43ms** |
-| QubitGrid | 3091ms | 1734ms | **149ms** |
-
-### JAX Backend
-
-JAX JIT provides 12-97x speedup for Krylov by compiling the entire Lanczos
-loop into a single XLA computation. Spectral sees modest improvement (1.2-2.5x)
-since eigendecomposition is already BLAS-optimized.
-
-**Known JAX limitations:**
-- Krylov gradient numerically unstable at d≥64 (autodiff through long recurrence)
-- Spectral gradient NaN at some d values (eigenvalue degeneracy)
-- M1 Metal GPU not supported (jax-metal broken for complex numbers)
-- Verdicts match NumPy at all tested dimensions
-
-### d=256 Feasibility (measured on M1)
-
-- **Canonical d=256 K_max=1500**: init <1s, ~1.6GB RAM — feasible
-- **Can d=256 Spectral random_polish** (top-1, maxiter=5): K=2: 3.8s, K=200: 12s, K=500: 27s, K=700: 37s
-- **Can d=256 Moment**: K=200: 112ms, K=500: 355ms
-- **Can d=256 Krylov random**: K=200: 86ms, K=500: 235ms (but skipped in sweep — dense _construct_H too slow at large K)
-- **QubitGrid d=256**: K=114 operators, rho_max=0.0017 << rho_c~0.05 — transition NOT capturable, skipped in v96
-- **QG d=256 timing**: Moment: 3ms, Krylov: 19ms, Spectral RP: 7.9s (all at K=50)
-- **random_polish dim-adaptive**: d>=256 uses top-1 + maxiter=5 (27s vs 57s old, correctness preserved)
-- **v96 sweep strategy**: d>=128 uses `random_polish` for Spectral (dim-adaptive internally)
-- **JAX at d=256**: SLOWER than NumPy (autodiff through 255 Lanczos steps unstable)
-- **Strategy**: JAX for d≤128, NumPy for d≥256
-
-### Eigendecomposition: scipy vs numpy on M1
-
-On Apple M1 Accelerate, scipy default (heevr/MRRR) is **2x faster** than numpy (heevd)
-at d≥256. `eigendecompose()` uses dimension-adaptive backend selection:
-- d < 256: numpy.linalg.eigh (heevd, divide & conquer)
-- d ≥ 256: scipy.linalg.eigh (heevr, MRRR, overwrite_a=True)
-
-### Parallel Restarts on M1
-
-- Accelerate's eigh is single-threaded per call
-- ThreadPoolExecutor: 0.97x (BLAS thread contention)
-- Multiprocessing (3 workers): 1.10x (memory bandwidth limited)
-- Multiprocessing (4 workers): 0.92x (overhead > parallelism)
-- Not viable on M1's unified memory architecture
-
-### M1 GPU Dead Ends (v74)
-
-No GPU acceleration for eigh on Apple Silicon:
-- MLX: eigh "not yet supported on GPU", complex64 only (no complex128)
-- PyTorch MPS: linalg.eigh not implemented, no float64
-- jax-metal: broken for complex numbers
-- All paths require NVIDIA CUDA for GPU eigendecomposition
-
-### Spectral Bottleneck (v78 profiling)
-
-At d=256 Spectral (12.3s total):
-- 60% gradient computation (vectorized BLAS, mathematically irreducible)
-- 18% eigh eigendecomposition
-- 12% sparse matvec in gradient (H_k @ U)
-- 9% einsum in gradient
-- <1% sparse H construction (optimized via COO assembly in v78)
-
-### Sparse H Construction
-
-Uses COO assembly (5-12x faster than CSR loop):
-- Pre-extracts COO data at `ReachabilityCriterion.__init__` time
-- Vectorized scaling via `np.repeat(lambdas, nnz_per_op) * coo_data`
-- Single COO→CSR conversion per call
+| d | K_c | Method | Time/trial | Notes |
+|---|-----|--------|-----------|-------|
+| 16 | 25 | L-BFGS-B | ~50ms | Fast, precise |
+| 32 | 55 | L-BFGS-B | ~200ms | Still fast |
+| 64 | 122 | L-BFGS-B | ~500ms | Acceptable |
+| 128 | 273 | random_polish | ~2s | K_c≥100 threshold |
+| 256 | ~700 | random_polish | ~90s | Balanced basis fix required |
 
 ### JAX Backend Selection
 
@@ -230,70 +231,3 @@ Uses COO assembly (5-12x faster than CSR loop):
 | Krylov | JAX JIT (12-97x faster) | NumPy (autodiff unstable) |
 | Spectral | NumPy (scipy eigh optimal) | NumPy |
 | Moment | NumPy | NumPy |
-
-### Benchmarks
-
-```bash
-python scripts/benchmark.py --quick              # Quick benchmark
-python scripts/benchmark.py --dims 16 32 64 128  # Full benchmark
-python scripts/benchmark_scaling.py              # Scaling analysis
-python scripts/benchmark_platform.py             # Platform-specific eigh
-python scripts/estimate_sweep_time.py            # Sweep time projection
-```
-## Recent Changes (v0.4.4)
-
-1. **`random_polish` optimizer**: New `method='random_polish'` in `OptimizableCriterion._maximize()`. Phase 1: 200+ random forward evals tracking top-3 candidates. Phase 2: short L-BFGS-B polish (maxiter=10) from top-3. Expected 5-10x faster than full L-BFGS-B for Spectral at d>=128.
-2. **Block sparse gradient**: `(K*d, d)` CSR block matrix built at init. Replaces K-loops in Spectral gradient, Krylov gradient, and Moment `_check()` with single sparse matmul.
-3. **`K_max` for CanonicalQuditModel**: Optional `K_max` parameter truncates basis during construction. Enables d=256 Canonical (K_max=3000 uses ~3MB vs 68GB for full d²=65536).
-4. **`spectral_method` in SweepConfig**: New field `spectral_method` (default `'L-BFGS-B'`). `production()` uses `'random_polish'` for d>=128. `fast()` always uses `'random_polish'`.
-5. **v96 sweep updated**: Canonical d=256 via K_max=1500 + pure random Spectral. QG d=256 skipped (ρ_max=0.0017). Canonical d>=128: Moment+Spectral only. SPECTRAL_KC[canonical][256]=700.
-6. **7 new tests** (Test L): random_polish, K_max, block sparse gradient. Total: 65 tests in 12 groups (A-L).
-
-## Previous Changes (v0.4.3)
-
-1. **`spectral_restarts` field**: Added to `SweepConfig` and `AdaptiveSweepConfig`. Spectral L-BFGS-B needs 5-10 restarts (vs Krylov random search's 3) to avoid false UNREACHABLE verdicts. Dimension-adaptive: 5 for d≤32, 10 for d≥64.
-2. **rho_c summary export**: v96 sweep saves `rho_c_summary.csv` and `rho_c_summary.json`. New `load_rho_c_summary()` helper in sampling.py.
-3. **Eigendecomposition caching**: `SpectralCriterion._cached_eigendecompose()` keyed on `lambdas.tobytes()`. Avoids redundant eigh during L-BFGS-B line search (same lambdas → same H → same eigh).
-4. **Sparse Krylov gradient**: Keeps H sparse throughout gradient loop instead of densifying via `.toarray()`. Sparse matvec for both forward (`H @ v_j`) and gradient (`H @ dV_curr.T`).
-5. **Chunked Spectral gradient**: Processes gradient in batches of 64 operators. Limits peak memory from O(K·d²) to O(64·d²) for large K.
-6. **QubitGrid d=256 in v96 sweep**: Moment+Krylov only (Spectral infeasible at 41s/trial). Krylov random: 11ms, Moment: 0.7ms. `--no-256` flag to skip.
-7. **14 new tests** (Tests J+K): Extended coverage (8 tests) + rho_c estimation (6 tests). Total: 58 tests in 11 groups (A-K).
-
-### Previous Changes (v0.4.2)
-
-1. **CRITICAL BUG FIX**: Fixed `nwhatsp.linalg.qr` typo in `_lanczos_basis()`. All Krylov forward-only evaluations were crashing.
-2. **_lanczos_basis refactored**: Now accepts `apply_qr: bool = True` parameter.
-3. **10 new tests** (Test I): Audit coverage tests.
-4. **v96 sweep script**: Two-pass K selection, publication-quality plots, bootstrap CIs, power-law fits.
-5. **New functions**: `estimate_rho_c()` and `bootstrap_rho_c()` in sampling.py.
-
-## Audit Findings (v0.4.2)
-
-### CRITICAL BUG: criteria.py line 550
-`nwhatsp.linalg.qr` is a typo for `np.linalg.qr`. Crashes all Krylov forward-only evaluations. Fix immediately.
-
-### QR re-orthogonalization is essential
-- Without QR, Lanczos orthogonality loss is catastrophic at d≥16 (‖V†V − I‖ up to 6.36)
-- Score errors up to 0.42 — verdict-changing at τ=0.99
-- Forward path (return_gradient=False) applies QR → correct scores
-- Gradient path (return_gradient=True) does NOT apply QR → approximate scores (intentional: QR has discontinuous gradients)
-
-### Krylov optimizer: Random-50 is optimal
-Benchmarked at d=16,32 transition regions: Random-50 gives 100% verdict agreement with all other methods while being 9–45× faster. Do NOT use Nelder-Mead or Powell for Krylov. Spectral MUST use L-BFGS-B.
-
-### Color scheme (canonical, must match between plotting.py and sweep scripts)
-- Moment: green (#2ca02c), circle (o)
-- Spectral: blue (#1f77b4), square (s)
-- Krylov: orange (#ff7f0e), triangle (^)
-
-### v96 sweep config
-- AdaptiveSweepConfig.min_hamiltonians = 10 (reduced from 20)
-- Two-pass K selection: coarse scan → dense around ρ_c
-- Bootstrap ρ_c confidence intervals
-- `spectral_restarts`: coarse pass=3, main pass=5 (d≤32) or 10 (d≥64)
-- `spectral_method`: `'random'` for d>=256, `'random_polish'` for d=128, `'L-BFGS-B'` for d<128
-- Canonical d=256: K_max=1500 (covers ρ up to ~0.023, well above ρ_c≈0.011)
-- Canonical d>=128: Moment+Spectral only (Krylov skipped — dense ops too slow)
-- QubitGrid d=256 skipped (K=114, ρ_max=0.0017 << ρ_c)
-- SPECTRAL_KC: canonical d=256 → K_c=700 (extrapolated)
-- Outputs: per-dimension CSVs + `rho_c_summary.csv` + `rho_c_summary.json`

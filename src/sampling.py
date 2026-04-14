@@ -567,9 +567,14 @@ def bootstrap_rho_c(
     if col not in df.columns:
         return (np.nan, np.nan, np.nan)
 
-    rho = df['rho'].values
-    P = df[col].values
-    n_trials = df['n_trials'].values
+    # Filter out NaN rows
+    mask = df[col].notna()
+    rho = df.loc[mask, 'rho'].values
+    P = df.loc[mask, col].values
+    n_trials = df.loc[mask, 'n_trials'].values
+
+    if len(P) == 0:
+        return (np.nan, np.nan, np.nan)
 
     rng = np.random.default_rng(seed)
     rho_c_samples = []

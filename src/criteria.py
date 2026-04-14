@@ -298,8 +298,8 @@ class OptimizableCriterion(ReachabilityCriterion):
 
             # Dimension-adaptive polish parameters
             if self.dim >= 256:
-                top_k = 1
-                polish_maxiter = 5
+                top_k = 3
+                polish_maxiter = 15
             else:
                 top_k = 3
                 polish_maxiter = 10
@@ -366,8 +366,8 @@ class OptimizableCriterion(ReachabilityCriterion):
         if self.dim >= 32:
             dim_factor = min(1 + (self.dim - 32) // 32, 3)
             effective_restarts = max(effective_restarts, restarts + 2 * dim_factor)
-        # Absolute minimum 5, hard cap 12
-        effective_restarts = min(max(effective_restarts, 5), 12)
+        # Absolute minimum 5, hard cap max(restarts, 12)
+        effective_restarts = min(max(effective_restarts, 5), max(restarts, 12))
 
         # Generate all starting points upfront
         x0_list = [np.array([rng.uniform(lo, hi) for lo, hi in bounds])

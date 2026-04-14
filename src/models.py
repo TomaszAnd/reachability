@@ -220,57 +220,98 @@ class CanonicalQuditModel(QuantumModel):
         self.K_max = K_max
         super().__init__(dim, seed)
 
+    @staticmethod
+    def _build_operator_by_index(d: int, idx: int) -> np.ndarray:
+        """Build a single Gell-Mann basis operator by its global index.
+
+        Index layout over d^2 operators:
+          [0, n_off):           X_jk = |j><k| + |k><j|   (n_off = d(d-1)/2)
+          [n_off, 2*n_off):     Y_jk = -i|j><k| + i|k><j|
+          [2*n_off, 2*n_off+d-1): Z_j = |j><j| - |j+1><j+1|
+          [d^2-1]:              Identity
+        """
+        n_off = d * (d - 1) // 2
+        mat = np.zeros((d, d), dtype=np.complex128)
+
+        if idx < n_off:
+            # X_jk: map linear index to (j, k) pair with j < k
+            remaining = idx
+            for j in range(d - 1):
+                count_j = d - 1 - j
+                if remaining < count_j:
+                    k = j + 1 + remaining
+                    mat[j, k] = 1.0
+                    mat[k, j] = 1.0
+                    return mat
+                remaining -= count_j
+        elif idx < 2 * n_off:
+            # Y_jk
+            remaining = idx - n_off
+            for j in range(d - 1):
+                count_j = d - 1 - j
+                if remaining < count_j:
+                    k = j + 1 + remaining
+                    mat[j, k] = -1j
+                    mat[k, j] = 1j
+                    return mat
+                remaining -= count_j
+        elif idx < 2 * n_off + d - 1:
+            # Z_j
+            j = idx - 2 * n_off
+            mat[j, j] = 1.0
+            mat[j + 1, j + 1] = -1.0
+            return mat
+        else:
+            # Identity
+            return np.eye(d, dtype=np.complex128)
+
+        return mat  # Should not reach here
+
     def _build_basis(self) -> List[np.ndarray]:
         d = self.dim
-        limit = self.K_max  # None means build all
-        operators = []
+        total_L = d * d if self.include_identity else d * d - 1
 
-        def _check_limit():
-            return limit is not None and len(operators) >= limit
+        if self.K_max is not None and self.K_max < total_L:
+            # Random sampling: pick K_max indices uniformly from all d^2
+            # operator types (X, Y, Z, I). This ensures a balanced mix
+            # across ALL row/column indices, avoiding the structural bias
+            # of sequential truncation (which produces only X-type operators
+            # concentrated in the first few rows).
+            indices = self._rng.choice(total_L, size=self.K_max, replace=False)
+            return [self._build_operator_by_index(d, int(i)) for i in indices]
+
+        # Full basis: build all operators sequentially
+        operators = []
 
         # X_jk operators
         for j in range(d):
-            if _check_limit():
-                break
             for k in range(j + 1, d):
                 mat = np.zeros((d, d), dtype=np.complex128)
                 mat[j, k] = 1.0
                 mat[k, j] = 1.0
                 operators.append(mat)
-                if _check_limit():
-                    break
 
         # Y_jk operators
-        if not _check_limit():
-            for j in range(d):
-                if _check_limit():
-                    break
-                for k in range(j + 1, d):
-                    mat = np.zeros((d, d), dtype=np.complex128)
-                    mat[j, k] = -1j
-                    mat[k, j] = 1j
-                    operators.append(mat)
-                    if _check_limit():
-                        break
+        for j in range(d):
+            for k in range(j + 1, d):
+                mat = np.zeros((d, d), dtype=np.complex128)
+                mat[j, k] = -1j
+                mat[k, j] = 1j
+                operators.append(mat)
 
         # Z_j operators
-        if not _check_limit():
-            for j in range(d - 1):
-                mat = np.zeros((d, d), dtype=np.complex128)
-                mat[j, j] = 1.0
-                mat[j + 1, j + 1] = -1.0
-                operators.append(mat)
-                if _check_limit():
-                    break
+        for j in range(d - 1):
+            mat = np.zeros((d, d), dtype=np.complex128)
+            mat[j, j] = 1.0
+            mat[j + 1, j + 1] = -1.0
+            operators.append(mat)
 
         # Identity
-        if not _check_limit() and self.include_identity:
+        if self.include_identity:
             operators.append(np.eye(d, dtype=np.complex128))
 
-        if limit is None:
-            expected_L = d * d if self.include_identity else d * d - 1
-            assert len(operators) == expected_L, (
-                f"Operator count mismatch: got {len(operators)}, expected {expected_L}")
+        assert len(operators) == total_L, (
+            f"Operator count mismatch: got {len(operators)}, expected {total_L}")
 
         return operators
 
